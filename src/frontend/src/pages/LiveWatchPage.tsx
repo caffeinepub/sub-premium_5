@@ -48,6 +48,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { LiveChatMessage, LiveGift } from "../backend.d";
+import { BattleResultModal } from "../components/BattleResultModal";
 import { BattleScoreboardWrapper } from "../components/BattleScoreboard";
 import { CoHostInviteModal } from "../components/CoHostInviteModal";
 import { ConfettiBurst } from "../components/ConfettiBurst";
@@ -57,16 +58,17 @@ import {
 } from "../components/GiftBroadcastOverlay";
 import type { PendingGift } from "../components/GiftBroadcastOverlay";
 import { HeartAnimation } from "../components/HeartAnimation";
-import { LiveBattleMode } from "../components/LiveBattleMode";
 import { LiveCoHostLayout } from "../components/LiveCoHostLayout";
 import { LiveEffectsPanel } from "../components/LiveEffectsPanel";
 import { TopEngagementChairs } from "../components/TopEngagementChairs";
+import { UserProfileModal } from "../components/UserProfileModal";
 import { ViewerListPanel } from "../components/ViewerListPanel";
 import { useActor } from "../hooks/useActor";
 import { useCoHostSystem } from "../hooks/useCoHostSystem";
 import { useEngagementStore } from "../hooks/useEngagementStore";
 import { useHeartTapSystem } from "../hooks/useHeartTapSystem";
 import { useLiveBattle } from "../hooks/useLiveBattle";
+import { useUserProfile } from "../hooks/useUserProfile";
 
 interface LiveWatchPageProps {
   streamId: bigint;
@@ -77,6 +79,10 @@ interface LiveWatchPageProps {
   onWeeklyLeaderboard?: () => void;
   isCreator?: boolean;
   streamTitle?: string;
+  /** Principal string of the creator — used to open their profile */
+  creatorPrincipal?: string;
+  /** Current logged-in user's principal string */
+  currentUserPrincipal?: string;
 }
 
 // ─── Full 12-gift catalog ─────────────────────────────────────────────────────
@@ -160,6 +166,13 @@ function generateSystemMessage(
     streamId: BigInt(0),
     timestamp: BigInt(Date.now()),
   };
+}
+
+function getGiftTierMultiplier(coins: number): number {
+  if (coins <= 100) return 1; // Small
+  if (coins <= 1000) return 2; // Medium
+  if (coins <= 20000) return 3; // Large
+  return 5; // Ultra
 }
 
 function formatCount(n: number) {
@@ -322,6 +335,8 @@ export default function LiveWatchPage({
   onWeeklyLeaderboard,
   isCreator = false,
   streamTitle = "Live Stream",
+  creatorPrincipal,
+  currentUserPrincipal,
 }: LiveWatchPageProps) {
   const [viewerCount, setViewerCount] = useState(
     Math.floor(Math.random() * 800 + 200),
@@ -371,7 +386,15 @@ export default function LiveWatchPage({
   } = useCoHostSystem();
 
   // Battle system
-  const { startBattle, addScore, resetBattle, battleState } = useLiveBattle();
+  const {
+    startBattle,
+    addScore,
+    addSupporter,
+    resetBattle,
+    recordWin,
+    battleState,
+    battleStats,
+  } = useLiveBattle();
 
   // Engagement store
   const { addTapPoints, addCommentPoints, addGiftPoints, getTop3 } =
@@ -394,6 +417,8 @@ export default function LiveWatchPage({
 
   const { actor } = useActor();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const { profileState, openProfile, closeProfile } = useUserProfile();
 
   const currentUserRef = useRef<string>("You");
 
@@ -420,12 +445,20 @@ export default function LiveWatchPage({
     onTapAnimated: handleTapAnimated,
   });
 
-  // When battle ends, show result modal
+  // When battle ends, show result modal and record win
+  const battleEndedRef = useRef(false);
   useEffect(() => {
     if (battleState.mode === "ended" && !showBattleResult) {
       setShowBattleResult(true);
+      if (!battleEndedRef.current) {
+        battleEndedRef.current = true;
+        recordWin(battleState.winner === "left");
+      }
     }
-  }, [battleState.mode, showBattleResult]);
+    if (battleState.mode === "active") {
+      battleEndedRef.current = false;
+    }
+  }, [battleState.mode, battleState.winner, showBattleResult, recordWin]);
 
   // Track server count history for sparkline
   useEffect(() => {
@@ -562,12 +595,13 @@ export default function LiveWatchPage({
         addTapPoints(currentUserRef.current);
         // Battle score for left side (if battle active)
         if (battleState.mode === "active") {
-          addScore("left", 1);
+          addScore("left", 1, "tap");
+          addSupporter("left", currentUserRef.current, 1);
         }
       }
       lastTapTimeRef.current = now;
     },
-    [recordTap, addTapPoints, battleState.mode, addScore],
+    [recordTap, addTapPoints, battleState.mode, addScore, addSupporter],
   );
 
   const handleSendMessage = async () => {
@@ -626,9 +660,13 @@ export default function LiveWatchPage({
       // Engagement points
       addGiftPoints(currentUserRef.current, selectedGift.coins);
 
-      // Battle score
+      // Battle score — gift battle points = coinValue * tierMultiplier
+      // The hook will further multiply by the battle multiplier (x1/x2/x3)
       if (battleState.mode === "active") {
-        addScore("left", Math.floor(selectedGift.coins * 0.001));
+        const giftTierMult = getGiftTierMultiplier(selectedGift.coins);
+        const giftBattlePoints = selectedGift.coins * giftTierMult;
+        addScore("left", giftBattlePoints, "gift");
+        addSupporter("left", currentUserRef.current, giftBattlePoints);
       }
 
       // Queue gift broadcast animation ONLY after server success
@@ -779,15 +817,14 @@ export default function LiveWatchPage({
       />
 
       {/* Battle result modal */}
-      <AnimatePresence>
-        {showBattleResult && battleState.mode === "ended" && (
-          <LiveBattleMode
-            battleState={battleState}
-            onRematch={handleRematch}
-            onEnd={handleEndBattle}
-          />
-        )}
-      </AnimatePresence>
+      {showBattleResult && battleState.mode === "ended" && (
+        <BattleResultModal
+          battleState={battleState}
+          battleStats={battleStats}
+          onRematch={handleRematch}
+          onEnd={handleEndBattle}
+        />
+      )}
 
       {/* Video / Stream Area — co-host layout when active */}
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: video tap area */}
@@ -960,16 +997,26 @@ export default function LiveWatchPage({
         className="absolute right-3 z-20 flex flex-col items-center gap-3"
         style={{ top: battleState.mode !== "idle" ? "170px" : "64px" }}
       >
-        {/* Creator avatar */}
+        {/* Creator avatar — clickable to open profile */}
         <div className="relative">
-          <div
-            className="w-12 h-12 rounded-full border-2 border-[#FF2D2D] flex items-center justify-center"
+          <button
+            type="button"
+            className="w-12 h-12 rounded-full border-2 border-[#FF2D2D] flex items-center justify-center cursor-pointer"
             style={{ background: "linear-gradient(135deg, #FF6B6B, #FF2D2D)" }}
+            onClick={() =>
+              openProfile(
+                creatorPrincipal ?? streamTitle ?? "creator",
+                streamTitle,
+                "creator",
+              )
+            }
+            data-ocid="live_watch.creator_avatar.button"
+            title="View creator profile"
           >
             <span className="text-white font-black text-lg">S</span>
-          </div>
+          </button>
           <div
-            className="absolute -bottom-1 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded-full"
+            className="absolute -bottom-1 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded-full pointer-events-none"
             style={{ background: "#FF2D2D" }}
           >
             <span className="text-white text-[8px] font-black">LIVE</span>
@@ -977,7 +1024,13 @@ export default function LiveWatchPage({
         </div>
 
         {/* Top 3 Engagement Chairs */}
-        <TopEngagementChairs top3={top3} streamId={streamId} />
+        <TopEngagementChairs
+          top3={top3}
+          streamId={streamId}
+          onOpenProfile={(userId, username, viewType) =>
+            openProfile(userId, username, viewType)
+          }
+        />
 
         {/* Heart button */}
         <motion.button
@@ -1190,16 +1243,59 @@ export default function LiveWatchPage({
                       textShadow: "0 0 8px rgba(255,215,0,0.5)",
                     }}
                   >
-                    🎁 {msg.text}
+                    {/* Parse @username from gift message and make it clickable */}
+                    {(() => {
+                      const match = msg.text.match(/^@(\S+)/);
+                      if (match?.[1]) {
+                        const giftUsername = match[1];
+                        const rest = msg.text.slice(giftUsername.length + 1);
+                        return (
+                          <>
+                            🎁{" "}
+                            <button
+                              type="button"
+                              className="font-bold hover:underline bg-transparent border-0 p-0 cursor-pointer"
+                              style={{ color: "#FFD700" }}
+                              onClick={() =>
+                                openProfile(
+                                  giftUsername,
+                                  giftUsername,
+                                  "viewer",
+                                )
+                              }
+                            >
+                              @{giftUsername}
+                            </button>
+                            {rest}
+                          </>
+                        );
+                      }
+                      return <>🎁 {msg.text}</>;
+                    })()}
                   </p>
                 ) : (
                   <>
-                    <span
-                      className="text-xs font-bold flex-shrink-0"
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (
+                          msg.senderUsername !== "system" &&
+                          msg.senderUsername !== "gift_system" &&
+                          msg.senderUsername !== "You"
+                        ) {
+                          openProfile(
+                            msg.sender.toString(),
+                            msg.senderUsername,
+                            "viewer",
+                          );
+                        }
+                      }}
+                      className="text-xs font-bold flex-shrink-0 hover:underline cursor-pointer bg-transparent border-0 p-0"
                       style={{ color: getChatColor(msg.senderUsername) }}
+                      data-ocid="live_watch.chat_username.button"
                     >
                       {msg.senderUsername}
-                    </span>
+                    </button>
                     <span className="text-xs text-white/90 break-words">
                       {msg.text}
                     </span>
@@ -1947,6 +2043,26 @@ export default function LiveWatchPage({
           setViewerListOpen(false);
           setCoHostModalOpen(true);
         }}
+        viewers={top3.map((entry) => ({
+          name: entry.username,
+          score: entry.score,
+          joinedAgo: 0,
+        }))}
+        onOpenProfile={(username) => {
+          setViewerListOpen(false);
+          openProfile(username, username, "viewer");
+        }}
+      />
+
+      {/* ─── USER PROFILE MODAL ─── */}
+      <UserProfileModal
+        open={profileState.open}
+        onClose={closeProfile}
+        userId={profileState.userId}
+        username={profileState.username}
+        viewType={profileState.viewType}
+        currentUserPrincipal={currentUserPrincipal}
+        onOpenGiftDrawer={() => setGiftDrawerOpen(true)}
       />
 
       {/* ─── EFFECTS PANEL ─── */}

@@ -41,6 +41,11 @@ const BADGE_CONFIGS = [
 interface TopEngagementChairsProps {
   top3: EngagementEntry[];
   streamId?: bigint;
+  onOpenProfile?: (
+    userId: string,
+    username: string,
+    viewType: "viewer" | "creator",
+  ) => void;
 }
 
 interface ViewerProfile {
@@ -48,7 +53,10 @@ interface ViewerProfile {
   rank: number;
 }
 
-export function TopEngagementChairs({ top3 }: TopEngagementChairsProps) {
+export function TopEngagementChairs({
+  top3,
+  onOpenProfile,
+}: TopEngagementChairsProps) {
   const [selectedViewer, setSelectedViewer] = useState<ViewerProfile | null>(
     null,
   );
@@ -77,11 +85,14 @@ export function TopEngagementChairs({ top3 }: TopEngagementChairsProps) {
                 stiffness: 260,
                 damping: 22,
               }}
-              onClick={() =>
-                isOccupied &&
-                entry &&
-                setSelectedViewer({ entry, rank: cfg.rank })
-              }
+              onClick={() => {
+                if (!isOccupied || !entry) return;
+                if (onOpenProfile) {
+                  onOpenProfile(entry.username, entry.username, "viewer");
+                } else {
+                  setSelectedViewer({ entry, rank: cfg.rank });
+                }
+              }}
               data-ocid={`live_watch.chair.item.${cfg.rank}`}
               className="relative flex flex-col items-center gap-0.5 w-11"
               style={{ cursor: isOccupied ? "pointer" : "default" }}
@@ -310,11 +321,19 @@ export function TopEngagementChairs({ top3 }: TopEngagementChairsProps) {
               </div>
             ) : (
               top3.map((entry, idx) => (
-                <div
+                <button
                   key={entry.username}
-                  className="flex items-center gap-3 px-4 py-3 rounded-2xl"
-                  style={{ background: "#111", border: "1px solid #1e1e1e" }}
+                  type="button"
+                  className="flex items-center gap-3 px-4 py-3 rounded-2xl w-full text-left"
+                  style={{
+                    background: "#111",
+                    border: "1px solid #1e1e1e",
+                    cursor: onOpenProfile ? "pointer" : "default",
+                  }}
                   data-ocid={`live_watch.viewers.item.${idx + 1}`}
+                  onClick={() =>
+                    onOpenProfile?.(entry.username, entry.username, "viewer")
+                  }
                 >
                   <span className="text-lg w-6">
                     {BADGE_CONFIGS[idx]?.label ?? `#${idx + 1}`}
@@ -340,7 +359,7 @@ export function TopEngagementChairs({ top3 }: TopEngagementChairsProps) {
                   <div className="flex items-center gap-1 text-yellow-400 text-xs font-bold">
                     🪙 {entry.giftPoints.toLocaleString()}
                   </div>
-                </div>
+                </button>
               ))
             )}
           </div>

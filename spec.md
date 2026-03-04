@@ -2,73 +2,81 @@
 
 ## Current State
 
-- Backend `getUserBalance()` returns a **hardcoded default of 1,000 coins** for new users.
-- `addCoins()` is a public function that can be called directly from the frontend without any payment verification.
-- `sendLiveGift()` deducts coins and appends the gift in one step, no transactional safeguards.
-- No payment transaction records exist in the backend.
-- No webhook verification, no duplicate-rejection, no wallet locking.
-- No admin dashboard functions for viewing recharge/gift transactions or flagging/reversing them.
-- Frontend `RechargePage` simulates payment client-side (setTimeout + direct `addCoins` call); stores recharge/transaction history in **localStorage**.
-- Frontend `WalletPage` reads all history from **localStorage**.
-- Frontend `WithdrawPage` stores withdrawal history in **localStorage**.
-- Frontend `LiveWatchPage` triggers gift broadcast animation locally before backend confirms success.
-- Frontend `WalletPage` shows live coin balance from backend but all history is mock.
+The app is a full video streaming platform with:
+- Live streaming system with viewer watch page (`LiveWatchPage.tsx`)
+- Top 3 engagement chairs (`TopEngagementChairs.tsx`) with a basic modal showing engagement points only
+- `ViewerListPanel.tsx` with hardcoded fake viewer data
+- Chat overlay with usernames rendered as plain text (not clickable)
+- Creator avatar on right side — not clickable
+- Gift sender usernames shown in chat messages — not clickable
+- No dedicated user profile modal or profile page for viewing other users
+- Backend has user profile data: `UserProfile`, `ExtendedProfile`, usernames map, follow/unfollow, subscriptions
+- No backend fields for: followers count, coins received/sent, battle stats, battle history, gift history, win streak, league tier, last active, profile privacy settings, user ban status
 
 ## Requested Changes (Diff)
 
 ### Add
 
-- Backend: `PaymentTransaction` type — stores paymentIntentId, amount, coins, provider, status, webhook-verified flag, timestamp, userId.
-- Backend: `GiftTransaction` type — stores txId, streamId, senderId, creatorId, giftType, coinValue, timestamp, status.
-- Backend: `rechargeTransactions` and `giftTransactions` maps.
-- Backend: `webhookAddCoins(userId, amount, paymentIntentId, webhookSignature)` — admin-only function that verifies payment signature, rejects duplicate paymentIntentId, then credits coins. This is the **only** way coins are created.
-- Backend: `sendGiftVerified(streamId, giftType, coinValue)` — atomic gift send: verify balance, deduct coins in same update, insert gift transaction, update creator pending balance, return unique txId. Traps on any failure.
-- Backend: `getRechargeTransactions()` — admin-only, returns all recharge records.
-- Backend: `getGiftTransactions()` — admin-only, returns all gift records.
-- Backend: `flagTransaction(txId, reason)` — admin-only, marks a transaction as flagged.
-- Backend: `reverseGiftTransaction(txId)` — admin-only, refunds coins to sender, marks gift transaction as reversed.
-- Backend: `auditWallets()` — admin-only, sets all users with no recharge transaction to 0 coins.
-- Backend: `creatorPendingBalance` map — tracks per-creator gift earnings not yet withdrawn.
-- Backend: `getCreatorPendingBalance()` — returns caller's pending balance.
-- Frontend: `AdminDashboardPage` — shows all recharge payments, all gift transactions, sender ID, creator ID, payment gateway ID, timestamp, status; flag and reverse buttons.
-- Frontend: Payment provider selector on RechargePage — Visa/Mastercard (Stripe), PayPal, Cash App (Stripe), Bank Transfer; shows real provider logos/labels; no card fields stored.
-- Frontend: Strict gift send flow in LiveWatchPage — call `sendGiftVerified`, only show animation/chat message after confirmed success, show error toast on failure.
+- `UserPublicProfile` type in backend: principal, username, displayName, bio, avatarUrl, joinDate, followersCount, followingCount, totalCoinsReceived, totalCoinsSent, battleWins, mvpCount, winStreak, leagueTier, isBanned, isLiveNow, privacySettings (showBattleHistory, showGiftHistory, showCoins)
+- `BattleHistoryEntry` type in backend: opponent name, result, score, date, isMvp
+- `GiftHistorySummary` type in backend: for creators (top gifts received, top supporters, total value), for viewers (total sent, favorite creator, highest gift)
+- Backend query: `getPublicProfile(userId: Principal)` — returns `UserPublicProfile`
+- Backend query: `getBattleHistory(userId: Principal)` — returns last 10 battle entries if privacy allows
+- Backend query: `getGiftHistorySummary(userId: Principal)` — returns gift history if privacy allowed
+- Backend mutation: `followUser(userId: Principal)` / `unfollowUser(userId: Principal)` — same as existing followCreator/unfollowCreator but generic
+- Backend mutation: `reportUser(userId: Principal, reason: Text)` — stores report
+- Backend mutation: `blockUser(userId: Principal)` — stores block list
+- Backend mutation: `updateProfilePrivacy(settings: PrivacySettings)` — saves privacy prefs
+- `UserProfileModal` component: full-screen slide-up modal with:
+  - Top section: large avatar, username, user ID, Follow/Unfollow, Message, Report, Block buttons
+  - Creator badges: Live badge (if live), league tier, level, MVP badge, 🥇 if recent win
+  - Stats section: followers, following, coins received, coins sent, battles wins, MVP count, win streak, league tier, join date
+  - Battle History section: lazy-loaded last 10 battles (honor privacy toggle)
+  - Gift History section: creator vs viewer variant (honor privacy toggle)
+  - Banned state: "Account Suspended" overlay
+  - 30-second cache, instant open animation, smooth slide-up
+- `ProfileContext` / `useProfile` hook: manages open/close state, userId being viewed, 30s cache
+- Profile access points wired in `LiveWatchPage`:
+  - Creator avatar (top right) → opens creator profile modal
+  - Top 3 chair avatars → opens viewer profile modal (upgraded from current basic modal)
+  - Chat username taps → opens viewer profile modal
+  - Gift sender username taps (gift messages in chat) → opens profile modal
+- Profile access points wired in `ViewerListPanel`:
+  - Each viewer row username/avatar tap → opens profile modal
+- Profile access in `LiveWatchPage` right-side opponent context (battle mode)
 
 ### Modify
 
-- Backend `getUserBalance()`: return `0` if no entry found (remove hardcoded 1000 default).
-- Backend `addCoins()`: make admin-only so it can no longer be called from the frontend. Rename to internal use only, keep for admin webhook flow.
-- Frontend `RechargePage`: remove all localStorage writes, remove direct `addCoins` call, remove simulated payment. After payment form submission show "Awaiting payment confirmation" state; poll `getCoinBalance` for update. Display provider selector.
-- Frontend `WalletPage`: remove all localStorage reads for transaction/gift/recharge history. Show only data from backend queries. Show "0 Coins" and "Recharge to send gifts" message if balance is 0.
-- Frontend `WithdrawPage`: remove localStorage writes/reads for withdrawal history.
-- Frontend `LiveWatchPage`: replace fire-and-forget gift with `sendGiftVerified`; block animation until backend returns success txId.
-- Backend `sendLiveGift()`: keep for backward compat but delegate to `sendGiftVerified` logic (or deprecate).
+- `TopEngagementChairs.tsx`: replace basic modal with `UserProfileModal` call via context
+- `ViewerListPanel.tsx`: remove hardcoded `ALL_VIEWERS` fake data; wire username taps to open profile modal; fetch real viewer list from backend (using engagement store data)
+- `LiveWatchPage.tsx`: make creator avatar clickable, wire chat username clicks, wire gift message username clicks
+- Backend `getUserProfile` — relax authorization to allow any user to view another user's public profile
 
 ### Remove
 
-- Backend: hardcoded `1000` default in `getUserBalance()`.
-- Frontend: all `localStorage.getItem/setItem` calls for `wallet_transactions`, `gift_history`, `recharge_history`, `withdrawal_history`.
-- Frontend: direct `actor.addCoins()` call in `RechargePage`.
-- Frontend: simulated `setTimeout` payment processing in `RechargePage`.
-- Frontend: local gift animation trigger before server confirmation.
+- Hardcoded `ALL_VIEWERS` array in `ViewerListPanel.tsx`
+- Hardcoded `MOCK_TOP_SUPPORTERS` array in `LiveWatchPage.tsx`
 
 ## Implementation Plan
 
-1. **Backend changes**:
-   - Add `PaymentTransaction`, `GiftTransaction` types and maps.
-   - Add `creatorPendingBalance` map.
-   - Fix `getUserBalance` to return 0 for new users.
-   - Make `addCoins` admin-only.
-   - Add `webhookAddCoins` (admin-only, dedup by paymentIntentId).
-   - Replace `sendLiveGift` body with atomic balance-check + deduction + gift-insert + creator-balance-update, returning unique txId.
-   - Add `sendGiftVerified` wrapper that the frontend calls.
-   - Add admin query functions: `getRechargeTransactions`, `getGiftTransactions`.
-   - Add `flagTransaction`, `reverseGiftTransaction`, `auditWallets`.
-   - Add `getCreatorPendingBalance`.
+1. Update Motoko backend to add `UserPublicProfile`, `BattleHistoryEntry`, `GiftHistorySummary` types, `getPublicProfile`, `getBattleHistory`, `getGiftHistorySummary`, `followUser`, `unfollowUser`, `reportUser`, `blockUser`, `updateProfilePrivacy` functions, and privacy settings storage.
 
-2. **Frontend changes**:
-   - `RechargePage`: add payment provider selector (Stripe/PayPal/CashApp/Bank), update UI to show "pending webhook" state after form submit, remove localStorage, remove direct addCoins.
-   - `WalletPage`: remove all localStorage helpers, load transaction/gift/recharge history from backend queries, show 0 balance state with "Recharge to send gifts".
-   - `WithdrawPage`: remove localStorage, use backend balance.
-   - `LiveWatchPage`: wrap gift send in `sendGiftVerified`, only dispatch animation on success.
-   - `AdminDashboardPage`: new page under Profile > Admin (admin-only) showing all transactions with flag/reverse actions.
+2. Create `UserProfileModal` component with:
+   - Slide-up Sheet/modal with full profile layout
+   - Top section with avatar, username, user ID, action buttons
+   - Creator-specific badges (Live, league tier, MVP, win badge)
+   - Stats grid (all fetched from backend, no hardcoded values)
+   - Battle history section (lazy loaded, respects privacy)
+   - Gift history section (creator vs viewer variant, respects privacy)
+   - Banned state handling
+   - 30-second in-memory cache keyed by Principal string
+   - Real-time WebSocket-style polling for follower count updates
+
+3. Create `useUserProfile` hook for cache management and fetch logic.
+
+4. Wire profile modal open triggers in:
+   - `LiveWatchPage`: creator avatar, chat usernames (chat and gift messages), right-side opponent
+   - `TopEngagementChairs`: chair avatar taps (upgrade existing modal)
+   - `ViewerListPanel`: viewer row taps (username + avatar), remove fake data
+
+5. Validate with typecheck and build.

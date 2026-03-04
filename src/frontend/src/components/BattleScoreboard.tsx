@@ -2,6 +2,7 @@ import { Swords } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import type { BattleState } from "../hooks/useLiveBattle";
+import { BattleMultiplierBadge } from "./BattleMultiplierBadge";
 
 interface BattleScoreboardProps {
   battleState: BattleState;
@@ -51,6 +52,12 @@ export function BattleScoreboard({
     leftUsername,
     rightUsername,
     winner,
+    battleType,
+    multiplier,
+    leftTaps,
+    rightTaps,
+    leftSupporters,
+    rightSupporters,
   } = battleState;
 
   const isEnded = mode === "ended";
@@ -60,6 +67,9 @@ export function BattleScoreboard({
 
   const isLowTime = timer <= 10 && mode === "active";
   const progress = timerDuration > 0 ? (timer / timerDuration) * 100 : 0;
+
+  const leftTopSupporter = leftSupporters[0]?.username ?? null;
+  const rightTopSupporter = rightSupporters[0]?.username ?? null;
 
   if (mode === "idle") return null;
 
@@ -76,8 +86,8 @@ export function BattleScoreboard({
       }}
       data-ocid="battle.scoreboard.panel"
     >
-      {/* Battle badge */}
-      <div className="flex items-center justify-center gap-1.5 mb-1.5">
+      {/* Battle badge + multiplier */}
+      <div className="flex items-center justify-center gap-2 mb-1.5">
         <motion.div
           animate={{ scale: [1, 1.05, 1] }}
           transition={{ duration: 1, repeat: Number.POSITIVE_INFINITY }}
@@ -92,6 +102,10 @@ export function BattleScoreboard({
             BATTLE
           </span>
         </motion.div>
+        <BattleMultiplierBadge
+          battleType={battleType}
+          multiplier={multiplier}
+        />
       </div>
 
       <div className="flex items-center gap-2">
@@ -149,8 +163,17 @@ export function BattleScoreboard({
               }}
             />
           </div>
-          {/* Top supporter stub */}
-          <span className="text-[9px] text-gray-600">🏆 luna_s</span>
+          {/* Tap count + top supporter */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[9px] text-gray-600">
+              💫 {leftTaps.toLocaleString()} taps
+            </span>
+            {leftTopSupporter && (
+              <span className="text-[9px] text-gray-600">
+                · 🏆 {leftTopSupporter}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Center: timer */}
@@ -167,7 +190,7 @@ export function BattleScoreboard({
             {isEnded ? "END" : formatTime(timer)}
           </motion.span>
 
-          {/* Timer progress ring */}
+          {/* Timer progress bar */}
           {!isEnded && (
             <svg width="32" height="4" aria-hidden="true">
               <rect x="0" y="0" width="32" height="4" rx="2" fill="#1a1a1a" />
@@ -251,7 +274,17 @@ export function BattleScoreboard({
               />
             </div>
           </div>
-          <span className="text-[9px] text-gray-600">🏆 alex_v</span>
+          {/* Tap count + top supporter */}
+          <div className="flex items-center gap-1.5 justify-end">
+            {rightTopSupporter && (
+              <span className="text-[9px] text-gray-600">
+                🏆 {rightTopSupporter} ·
+              </span>
+            )}
+            <span className="text-[9px] text-gray-600">
+              💫 {rightTaps.toLocaleString()} taps
+            </span>
+          </div>
         </div>
       </div>
     </motion.div>

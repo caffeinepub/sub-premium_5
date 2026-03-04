@@ -55,11 +55,14 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { Playlist, VideoPost } from "../backend.d";
+import { BattleStatsCard } from "../components/BattleStatsCard";
 import { EditProfilePanel } from "../components/EditProfilePanel";
 import { LanguageSelector } from "../components/LanguageSelector";
+import { MVPBadge } from "../components/MVPBadge";
 import { OnlineStatusDot } from "../components/OnlineStatusDot";
 import { useActor } from "../hooks/useActor";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
+import { useLiveBattle } from "../hooks/useLiveBattle";
 import {
   useClearWatchHistory,
   useCreatePlaylist,
@@ -1419,6 +1422,9 @@ export default function ProfilePage({
   const { data: allVideos = [] } = useListVideoPosts();
   const [editOpen, setEditOpen] = useState(false);
 
+  // Battle stats for profile display
+  const { battleStats } = useLiveBattle();
+
   // Use extended profile name if available, fallback to username
   const displayName =
     extendedProfile?.name ||
@@ -1474,23 +1480,31 @@ export default function ProfilePage({
           >
             <div className="flex items-center gap-4">
               <div className="relative">
-                {extendedProfile?.avatarUrl ? (
-                  <div className="w-16 h-16 rounded-2xl overflow-hidden">
-                    <img
-                      src={extendedProfile.avatarUrl}
-                      alt={displayName}
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                ) : (
-                  <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center font-black text-xl text-white">
-                    {isLoading ? (
-                      <User2 className="w-7 h-7 text-white" />
-                    ) : (
-                      initials
-                    )}
-                  </div>
-                )}
+                <MVPBadge
+                  lastBattleWon={
+                    battleStats.totalWins > 0 && battleStats.currentStreak > 0
+                  }
+                  winStreak={battleStats.currentStreak}
+                  mvpCount={battleStats.mvpCount}
+                >
+                  {extendedProfile?.avatarUrl ? (
+                    <div className="w-16 h-16 rounded-2xl overflow-hidden">
+                      <img
+                        src={extendedProfile.avatarUrl}
+                        alt={displayName}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center font-black text-xl text-white">
+                      {isLoading ? (
+                        <User2 className="w-7 h-7 text-white" />
+                      ) : (
+                        initials
+                      )}
+                    </div>
+                  )}
+                </MVPBadge>
                 {/* Online status dot — bottom-right of avatar */}
                 <div className="absolute -bottom-1 -right-1">
                   <OnlineStatusDot lastActiveAt={lastActiveAt} size="md" />
@@ -1601,11 +1615,21 @@ export default function ProfilePage({
             </CollapsibleSection>
           </motion.div>
 
-          {/* Settings */}
+          {/* Battle Stats */}
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.28, delay: sectionDelay(3) }}
+          >
+            <SettingsDivider label="Battle Stats" />
+            <BattleStatsCard battleStats={battleStats} />
+          </motion.div>
+
+          {/* Settings */}
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.28, delay: sectionDelay(4) }}
           >
             <CollapsibleSection
               icon={Settings}
@@ -1624,7 +1648,7 @@ export default function ProfilePage({
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.28, delay: sectionDelay(4) }}
+            transition={{ duration: 0.28, delay: sectionDelay(5) }}
           >
             <Button
               onClick={() => void handleLogout()}

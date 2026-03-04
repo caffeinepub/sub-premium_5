@@ -8,35 +8,20 @@ import {
 import { Gift, Search, UserPlus, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
-const ALL_VIEWERS = [
-  { name: "alex_v", score: 9820, joinedAgo: 2 },
-  { name: "sarah_m", score: 8450, joinedAgo: 5 },
-  { name: "james_k", score: 7230, joinedAgo: 1 },
-  { name: "priya_d", score: 6910, joinedAgo: 8 },
-  { name: "tony_r", score: 5580, joinedAgo: 12 },
-  { name: "luna_s", score: 4990, joinedAgo: 3 },
-  { name: "max_c", score: 4210, joinedAgo: 15 },
-  { name: "belle_w", score: 3870, joinedAgo: 6 },
-  { name: "carlos_g", score: 3340, joinedAgo: 20 },
-  { name: "yuki_t", score: 2910, joinedAgo: 4 },
-  { name: "mike_f", score: 2670, joinedAgo: 9 },
-  { name: "anna_k", score: 2380, joinedAgo: 11 },
-  { name: "leo_b", score: 1990, joinedAgo: 14 },
-  { name: "sara_p", score: 1720, joinedAgo: 7 },
-  { name: "kai_w", score: 1450, joinedAgo: 18 },
-  { name: "mia_r", score: 1210, joinedAgo: 22 },
-  { name: "ethan_j", score: 980, joinedAgo: 10 },
-  { name: "zoe_l", score: 840, joinedAgo: 25 },
-  { name: "noah_c", score: 620, joinedAgo: 30 },
-  { name: "ella_d", score: 410, joinedAgo: 35 },
-];
-
 type FilterMode = "active" | "recent" | "gifters";
+
+export interface ViewerEntry {
+  name: string;
+  score: number;
+  joinedAgo: number;
+}
 
 interface ViewerListPanelProps {
   open: boolean;
   onClose: () => void;
   onInviteToCoHost: (username: string) => void;
+  viewers?: ViewerEntry[];
+  onOpenProfile?: (username: string) => void;
 }
 
 const AVATAR_COLORS = [
@@ -53,12 +38,14 @@ export function ViewerListPanel({
   open,
   onClose,
   onInviteToCoHost,
+  viewers = [],
+  onOpenProfile,
 }: ViewerListPanelProps) {
   const [filterMode, setFilterMode] = useState<FilterMode>("active");
   const [search, setSearch] = useState("");
 
   const sortedViewers = useMemo(() => {
-    let sorted = [...ALL_VIEWERS];
+    let sorted = [...viewers];
     if (filterMode === "active") sorted.sort((a, b) => b.score - a.score);
     else if (filterMode === "recent")
       sorted.sort((a, b) => a.joinedAgo - b.joinedAgo);
@@ -70,7 +57,7 @@ export function ViewerListPanel({
       sorted = sorted.filter((v) => v.name.toLowerCase().includes(q));
     }
     return sorted;
-  }, [filterMode, search]);
+  }, [filterMode, search, viewers]);
 
   const filters: { id: FilterMode; label: string }[] = [
     { id: "active", label: "Most Active" },
@@ -96,7 +83,7 @@ export function ViewerListPanel({
                 className="px-2 py-0.5 rounded-full text-xs font-bold"
                 style={{ background: "#FF2D2D", color: "white" }}
               >
-                {ALL_VIEWERS.length}
+                {viewers.length}
               </span>
             </div>
             <button
@@ -146,79 +133,104 @@ export function ViewerListPanel({
 
         <ScrollArea className="px-5 pb-8" style={{ maxHeight: "58vh" }}>
           <div className="flex flex-col gap-2 pb-4">
-            {sortedViewers.map((viewer, idx) => {
-              const gradient =
-                AVATAR_COLORS[idx % AVATAR_COLORS.length] ?? AVATAR_COLORS[0]!;
-              return (
-                <div
-                  key={viewer.name}
-                  className="flex items-center gap-3 px-3 py-2.5 rounded-xl"
-                  style={{ background: "#111", border: "1px solid #1e1e1e" }}
-                  data-ocid={`viewer_list.item.${idx + 1}`}
-                >
-                  {/* Rank */}
-                  <span
-                    className="text-xs font-bold w-5 text-center flex-shrink-0"
-                    style={{
-                      color:
-                        idx === 0
-                          ? "#FFD700"
-                          : idx === 1
-                            ? "#C0C0C0"
-                            : idx === 2
-                              ? "#CD7F32"
-                              : "#555",
-                    }}
-                  >
-                    #{idx + 1}
-                  </span>
-
-                  {/* Avatar */}
+            {sortedViewers.length === 0 ? (
+              <div
+                className="text-center py-12 text-gray-500 text-sm"
+                data-ocid="viewer_list.empty_state"
+              >
+                No viewers yet — be the first!
+              </div>
+            ) : (
+              sortedViewers.map((viewer, idx) => {
+                const gradient =
+                  AVATAR_COLORS[idx % AVATAR_COLORS.length] ??
+                  AVATAR_COLORS[0]!;
+                return (
                   <div
-                    className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
-                    style={{ background: gradient }}
+                    key={viewer.name}
+                    className="flex items-center gap-3 px-3 py-2.5 rounded-xl"
+                    style={{ background: "#111", border: "1px solid #1e1e1e" }}
+                    data-ocid={`viewer_list.item.${idx + 1}`}
                   >
-                    <span className="text-white text-xs font-black">
-                      {viewer.name[0]?.toUpperCase()}
+                    {/* Rank */}
+                    <span
+                      className="text-xs font-bold w-5 text-center flex-shrink-0"
+                      style={{
+                        color:
+                          idx === 0
+                            ? "#FFD700"
+                            : idx === 1
+                              ? "#C0C0C0"
+                              : idx === 2
+                                ? "#CD7F32"
+                                : "#555",
+                      }}
+                    >
+                      #{idx + 1}
                     </span>
-                  </div>
 
-                  {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-white text-sm font-semibold truncate">
-                      @{viewer.name}
-                    </p>
-                    <p className="text-gray-600 text-[10px]">
-                      {viewer.score.toLocaleString()} pts · {viewer.joinedAgo}m
-                      ago
-                    </p>
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex gap-1.5 flex-shrink-0">
+                    {/* Avatar — clickable */}
                     <button
                       type="button"
-                      onClick={() => onInviteToCoHost(viewer.name)}
-                      className="w-8 h-8 rounded-full flex items-center justify-center transition-colors"
-                      style={{ background: "rgba(255,45,45,0.15)" }}
-                      title="Invite to co-host"
-                      data-ocid={`viewer_list.invite.button.${idx + 1}`}
+                      onClick={() => onOpenProfile?.(viewer.name)}
+                      className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+                      style={{
+                        background: gradient,
+                        cursor: onOpenProfile ? "pointer" : "default",
+                      }}
+                      data-ocid={`viewer_list.avatar.button.${idx + 1}`}
+                      title={`View ${viewer.name}'s profile`}
                     >
-                      <UserPlus className="w-3.5 h-3.5 text-red-400" />
+                      <span className="text-white text-xs font-black">
+                        {viewer.name[0]?.toUpperCase()}
+                      </span>
                     </button>
-                    <button
-                      type="button"
-                      className="w-8 h-8 rounded-full flex items-center justify-center transition-colors"
-                      style={{ background: "rgba(255,215,0,0.12)" }}
-                      title="Send gift"
-                      data-ocid={`viewer_list.gift.button.${idx + 1}`}
-                    >
-                      <Gift className="w-3.5 h-3.5 text-yellow-400" />
-                    </button>
+
+                    {/* Info — username clickable */}
+                    <div className="flex-1 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => onOpenProfile?.(viewer.name)}
+                        className="text-white text-sm font-semibold truncate block hover:underline bg-transparent border-0 p-0 text-left"
+                        style={{
+                          cursor: onOpenProfile ? "pointer" : "default",
+                        }}
+                        data-ocid={`viewer_list.username.button.${idx + 1}`}
+                      >
+                        @{viewer.name}
+                      </button>
+                      <p className="text-gray-600 text-[10px]">
+                        {viewer.score.toLocaleString()} pts · {viewer.joinedAgo}
+                        m ago
+                      </p>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex gap-1.5 flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => onInviteToCoHost(viewer.name)}
+                        className="w-8 h-8 rounded-full flex items-center justify-center transition-colors"
+                        style={{ background: "rgba(255,45,45,0.15)" }}
+                        title="Invite to co-host"
+                        data-ocid={`viewer_list.invite.button.${idx + 1}`}
+                      >
+                        <UserPlus className="w-3.5 h-3.5 text-red-400" />
+                      </button>
+                      <button
+                        type="button"
+                        className="w-8 h-8 rounded-full flex items-center justify-center transition-colors"
+                        style={{ background: "rgba(255,215,0,0.12)" }}
+                        title="Send gift"
+                        data-ocid={`viewer_list.gift.button.${idx + 1}`}
+                      >
+                        <Gift className="w-3.5 h-3.5 text-yellow-400" />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </ScrollArea>
       </SheetContent>
