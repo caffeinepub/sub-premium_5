@@ -7,13 +7,14 @@ import Principal "mo:core/Principal";
 import Map "mo:core/Map";
 import Iter "mo:core/Iter";
 import Set "mo:core/Set";
+import Text "mo:core/Text";
 import MixinAuthorization "authorization/MixinAuthorization";
 import MixinStorage "blob-storage/Mixin";
-import Storage "blob-storage/Storage";
 import AccessControl "authorization/access-control";
-import Migration "migration";
+import Storage "blob-storage/Storage";
 
-(with migration = Migration.run)
+
+
 actor {
   // Initialize the access control state
   let accessControlState = AccessControl.initState();
@@ -27,7 +28,18 @@ actor {
     username : Text;
   };
 
+  public type ExtendedProfile = {
+    name : Text;
+    username : Text;
+    bio : Text;
+    avatarUrl : ?Text;
+    cardholderName : ?Text;
+    maskedCardNumber : ?Text;
+    expiryDate : ?Text;
+  };
+
   let userProfiles = Map.empty<Principal, UserProfile>();
+  let extendedProfiles = Map.empty<Principal, ExtendedProfile>();
 
   // User profile operations
   public query ({ caller }) func getCallerUserProfile() : async ?UserProfile {
@@ -49,6 +61,91 @@ actor {
       Runtime.trap("Unauthorized: Only users can save profiles");
     };
     userProfiles.add(caller, profile);
+  };
+
+  public shared ({ caller }) func saveExtendedProfile(profile : ExtendedProfile) : async () {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can save profiles");
+    };
+
+    if (profile.bio.size() > 160) {
+      Runtime.trap("Bio must be 160 characters or less");
+    };
+
+    // Check if username is being changed and if so, verify it's available
+    let currentExtendedProfile = extendedProfiles.get(caller);
+    let currentUsername = switch (currentExtendedProfile) {
+      case (?p) { ?p.username };
+      case (null) { null };
+    };
+
+    // If username is different from current, check availability
+    let usernameChanged = switch (currentUsername) {
+      case (?current) { current != profile.username };
+      case (null) { true };
+    };
+
+    if (usernameChanged) {
+      // Check if username is taken by another user
+      let usernameLower = profile.username.toLower();
+      
+      // Check in userProfiles
+      for ((principal, userProfile) in userProfiles.entries()) {
+        if (principal != caller and userProfile.username.toLower() == usernameLower) {
+          Runtime.trap("Username already taken");
+        };
+      };
+
+      // Check in extendedProfiles
+      for ((principal, extProfile) in extendedProfiles.entries()) {
+        if (principal != caller and extProfile.username.toLower() == usernameLower) {
+          Runtime.trap("Username already taken");
+        };
+      };
+
+      // Check in usernames map
+      for ((principal, username) in usernames.entries()) {
+        if (principal != caller and username.toLower() == usernameLower) {
+          Runtime.trap("Username already taken");
+        };
+      };
+    };
+
+    extendedProfiles.add(caller, profile);
+  };
+
+  public query ({ caller }) func getExtendedProfile() : async ?ExtendedProfile {
+    checkAuthenticatedUser(caller);
+    extendedProfiles.get(caller);
+  };
+
+  public query ({ caller }) func checkUsernameAvailable(username : Text) : async Bool {
+    // Public access - anyone including guests can check username availability
+    // This is needed for registration/signup flows
+    let usernameLower = username.toLower();
+    
+    // Check in userProfiles
+    for ((principal, profile) in userProfiles.entries()) {
+      if (profile.username.toLower() == usernameLower) {
+        return false;
+      };
+    };
+
+    // Check in extendedProfiles
+    for ((principal, profile) in extendedProfiles.entries()) {
+      if (profile.username.toLower() == usernameLower) {
+        return false;
+      };
+    };
+
+    // Check in usernames map
+    for ((principal, uname) in usernames.entries()) {
+      if (uname.toLower() == usernameLower) {
+        return false;
+      };
+    };
+
+    true;
   };
 
   // Custom data
@@ -175,17 +272,26 @@ actor {
   };
 
   public shared ({ caller }) func renamePlaylist(id : Nat, name : Text) : async () {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can rename playlists");
+    };
     let playlist = getPlaylistOrTrapInternal(id, caller);
     let updatedPlaylist = { playlist with name };
     playlists.add(id, updatedPlaylist);
   };
 
   public shared ({ caller }) func deletePlaylist(id : Nat) : async () {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can delete playlists");
+    };
     let _ = getPlaylistOrTrapInternal(id, caller); // Will trap if not owner
     playlists.remove(id);
   };
 
   public shared ({ caller }) func addVideoToPlaylist(playlistId : Nat, videoId : Nat) : async () {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can add videos to playlists");
+    };
     let playlist = getPlaylistOrTrapInternal(playlistId, caller);
     let newVideoIds = playlist.videoIds.concat([videoId]);
     let updatedPlaylist = { playlist with videoIds = newVideoIds };
@@ -193,6 +299,9 @@ actor {
   };
 
   public shared ({ caller }) func removeVideoFromPlaylist(playlistId : Nat, videoId : Nat) : async () {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can remove videos from playlists");
+    };
     let playlist = getPlaylistOrTrapInternal(playlistId, caller);
     let newVideoIds = playlist.videoIds.filter(func(id) { id != videoId });
     let updatedPlaylist = { playlist with videoIds = newVideoIds };
@@ -396,4 +505,3 @@ actor {
     };
   };
 };
-

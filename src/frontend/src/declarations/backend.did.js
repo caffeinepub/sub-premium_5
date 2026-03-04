@@ -30,6 +30,15 @@ export const AiSearchEntry = IDL.Record({
   'searchQuery' : IDL.Text,
 });
 export const UserProfile = IDL.Record({ 'username' : IDL.Text });
+export const ExtendedProfile = IDL.Record({
+  'bio' : IDL.Text,
+  'username' : IDL.Text,
+  'expiryDate' : IDL.Opt(IDL.Text),
+  'name' : IDL.Text,
+  'cardholderName' : IDL.Opt(IDL.Text),
+  'avatarUrl' : IDL.Opt(IDL.Text),
+  'maskedCardNumber' : IDL.Opt(IDL.Text),
+});
 export const Playlist = IDL.Record({
   'id' : IDL.Nat,
   'owner' : IDL.Principal,
@@ -81,6 +90,7 @@ export const idlService = IDL.Service({
   '_initializeAccessControlWithSecret' : IDL.Func([IDL.Text], [], []),
   'addVideoToPlaylist' : IDL.Func([IDL.Nat, IDL.Nat], [], []),
   'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
+  'checkUsernameAvailable' : IDL.Func([IDL.Text], [IDL.Bool], ['query']),
   'clearAiSearchHistory' : IDL.Func([], [], []),
   'clearWatchHistory' : IDL.Func([], [], []),
   'createPlaylist' : IDL.Func([IDL.Text], [IDL.Nat], []),
@@ -95,6 +105,7 @@ export const idlService = IDL.Service({
   'getAiSearchHistory' : IDL.Func([], [IDL.Vec(AiSearchEntry)], ['query']),
   'getCallerUserProfile' : IDL.Func([], [IDL.Opt(UserProfile)], ['query']),
   'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
+  'getExtendedProfile' : IDL.Func([], [IDL.Opt(ExtendedProfile)], ['query']),
   'getPlaylist' : IDL.Func([IDL.Nat], [IDL.Opt(Playlist)], ['query']),
   'getSavedVideos' : IDL.Func([], [IDL.Vec(IDL.Nat)], ['query']),
   'getSubscriptions' : IDL.Func([], [IDL.Vec(IDL.Principal)], ['query']),
@@ -121,6 +132,7 @@ export const idlService = IDL.Service({
   'renamePlaylist' : IDL.Func([IDL.Nat, IDL.Text], [], []),
   'saveAiSearchHistory' : IDL.Func([IDL.Text], [], []),
   'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
+  'saveExtendedProfile' : IDL.Func([ExtendedProfile], [], []),
   'saveVideo' : IDL.Func([IDL.Nat], [], []),
   'setUsername' : IDL.Func([IDL.Text], [], []),
   'unfollowCreator' : IDL.Func([IDL.Principal], [], []),
@@ -152,6 +164,15 @@ export const idlFactory = ({ IDL }) => {
     'searchQuery' : IDL.Text,
   });
   const UserProfile = IDL.Record({ 'username' : IDL.Text });
+  const ExtendedProfile = IDL.Record({
+    'bio' : IDL.Text,
+    'username' : IDL.Text,
+    'expiryDate' : IDL.Opt(IDL.Text),
+    'name' : IDL.Text,
+    'cardholderName' : IDL.Opt(IDL.Text),
+    'avatarUrl' : IDL.Opt(IDL.Text),
+    'maskedCardNumber' : IDL.Opt(IDL.Text),
+  });
   const Playlist = IDL.Record({
     'id' : IDL.Nat,
     'owner' : IDL.Principal,
@@ -203,6 +224,7 @@ export const idlFactory = ({ IDL }) => {
     '_initializeAccessControlWithSecret' : IDL.Func([IDL.Text], [], []),
     'addVideoToPlaylist' : IDL.Func([IDL.Nat, IDL.Nat], [], []),
     'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
+    'checkUsernameAvailable' : IDL.Func([IDL.Text], [IDL.Bool], ['query']),
     'clearAiSearchHistory' : IDL.Func([], [], []),
     'clearWatchHistory' : IDL.Func([], [], []),
     'createPlaylist' : IDL.Func([IDL.Text], [IDL.Nat], []),
@@ -217,6 +239,7 @@ export const idlFactory = ({ IDL }) => {
     'getAiSearchHistory' : IDL.Func([], [IDL.Vec(AiSearchEntry)], ['query']),
     'getCallerUserProfile' : IDL.Func([], [IDL.Opt(UserProfile)], ['query']),
     'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
+    'getExtendedProfile' : IDL.Func([], [IDL.Opt(ExtendedProfile)], ['query']),
     'getPlaylist' : IDL.Func([IDL.Nat], [IDL.Opt(Playlist)], ['query']),
     'getSavedVideos' : IDL.Func([], [IDL.Vec(IDL.Nat)], ['query']),
     'getSubscriptions' : IDL.Func([], [IDL.Vec(IDL.Principal)], ['query']),
@@ -243,6 +266,7 @@ export const idlFactory = ({ IDL }) => {
     'renamePlaylist' : IDL.Func([IDL.Nat, IDL.Text], [], []),
     'saveAiSearchHistory' : IDL.Func([IDL.Text], [], []),
     'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
+    'saveExtendedProfile' : IDL.Func([ExtendedProfile], [], []),
     'saveVideo' : IDL.Func([IDL.Nat], [], []),
     'setUsername' : IDL.Func([IDL.Text], [], []),
     'unfollowCreator' : IDL.Func([IDL.Principal], [], []),

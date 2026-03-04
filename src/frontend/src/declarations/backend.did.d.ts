@@ -11,6 +11,15 @@ import type { IDL } from '@icp-sdk/core/candid';
 import type { Principal } from '@icp-sdk/core/principal';
 
 export interface AiSearchEntry { 'timestamp' : bigint, 'searchQuery' : string }
+export interface ExtendedProfile {
+  'bio' : string,
+  'username' : string,
+  'expiryDate' : [] | [string],
+  'name' : string,
+  'cardholderName' : [] | [string],
+  'avatarUrl' : [] | [string],
+  'maskedCardNumber' : [] | [string],
+}
 export type ExternalBlob = Uint8Array;
 export interface Playlist {
   'id' : bigint,
@@ -63,6 +72,7 @@ export interface _SERVICE {
   '_initializeAccessControlWithSecret' : ActorMethod<[string], undefined>,
   'addVideoToPlaylist' : ActorMethod<[bigint, bigint], undefined>,
   'assignCallerUserRole' : ActorMethod<[Principal, UserRole], undefined>,
+  'checkUsernameAvailable' : ActorMethod<[string], boolean>,
   'clearAiSearchHistory' : ActorMethod<[], undefined>,
   'clearWatchHistory' : ActorMethod<[], undefined>,
   'createPlaylist' : ActorMethod<[string], bigint>,
@@ -76,6 +86,7 @@ export interface _SERVICE {
   'getAiSearchHistory' : ActorMethod<[], Array<AiSearchEntry>>,
   'getCallerUserProfile' : ActorMethod<[], [] | [UserProfile]>,
   'getCallerUserRole' : ActorMethod<[], UserRole>,
+  'getExtendedProfile' : ActorMethod<[], [] | [ExtendedProfile]>,
   'getPlaylist' : ActorMethod<[bigint], [] | [Playlist]>,
   'getSavedVideos' : ActorMethod<[], Array<bigint>>,
   'getSubscriptions' : ActorMethod<[], Array<Principal>>,
@@ -94,6 +105,7 @@ export interface _SERVICE {
   'renamePlaylist' : ActorMethod<[bigint, string], undefined>,
   'saveAiSearchHistory' : ActorMethod<[string], undefined>,
   'saveCallerUserProfile' : ActorMethod<[UserProfile], undefined>,
+  'saveExtendedProfile' : ActorMethod<[ExtendedProfile], undefined>,
   'saveVideo' : ActorMethod<[bigint], undefined>,
   'setUsername' : ActorMethod<[string], undefined>,
   'unfollowCreator' : ActorMethod<[Principal], undefined>,

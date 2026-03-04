@@ -1,6 +1,25 @@
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Sheet,
   SheetContent,
@@ -8,13 +27,20 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  Ban,
   BookmarkIcon,
   ChevronDown,
   Crown,
+  Database,
+  Eye,
+  Film,
+  HardDrive,
   ListVideo,
   LogOut,
+  Moon,
   Pencil,
   Play,
   Plus,
@@ -27,10 +53,15 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { Playlist, VideoPost } from "../backend.d";
+import { EditProfilePanel } from "../components/EditProfilePanel";
+import { LanguageSelector } from "../components/LanguageSelector";
+import { OnlineStatusDot } from "../components/OnlineStatusDot";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import {
+  useClearWatchHistory,
   useCreatePlaylist,
   useDeletePlaylist,
+  useGetExtendedProfile,
   useGetSavedVideos,
   useGetUsername,
   useIsPremium,
@@ -40,6 +71,588 @@ import {
   useRenamePlaylist,
   useUnsaveVideo,
 } from "../hooks/useQueries";
+import { formatActiveStatus, getActiveStatus } from "../utils/activeStatus";
+
+// ─── localStorage helpers ─────────────────────────────────────────────────────
+
+function useLocalStorage<T>(key: string, defaultValue: T): [T, (v: T) => void] {
+  const [value, setValue] = useState<T>(() => {
+    try {
+      const stored = localStorage.getItem(key);
+      return stored !== null ? (JSON.parse(stored) as T) : defaultValue;
+    } catch {
+      return defaultValue;
+    }
+  });
+
+  const set = (v: T) => {
+    setValue(v);
+    try {
+      localStorage.setItem(key, JSON.stringify(v));
+    } catch {
+      // ignore
+    }
+  };
+
+  return [value, set];
+}
+
+// ─── Settings sub-components ──────────────────────────────────────────────────
+
+function SettingsDivider({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-3 pt-4 pb-1">
+      <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">
+        {label}
+      </span>
+      <div className="flex-1 h-px bg-white/6" />
+    </div>
+  );
+}
+
+function SettingsToggleRow({
+  label,
+  description,
+  ocid,
+  checked,
+  onCheckedChange,
+}: {
+  label: string;
+  description?: string;
+  ocid: string;
+  checked: boolean;
+  onCheckedChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-2.5">
+      <div className="flex-1 min-w-0">
+        <Label className="text-sm font-medium text-foreground cursor-pointer">
+          {label}
+        </Label>
+        {description && (
+          <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+        )}
+      </div>
+      <Switch
+        checked={checked}
+        onCheckedChange={onCheckedChange}
+        data-ocid={ocid}
+        className="shrink-0"
+      />
+    </div>
+  );
+}
+
+function SettingsSelectRow({
+  label,
+  ocid,
+  value,
+  onValueChange,
+  options,
+}: {
+  label: string;
+  ocid: string;
+  value: string;
+  onValueChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-2.5">
+      <Label className="text-sm font-medium text-foreground">{label}</Label>
+      <Select value={value} onValueChange={onValueChange}>
+        <SelectTrigger
+          className="w-32 h-9 bg-secondary/60 border-border/30 rounded-xl text-sm"
+          data-ocid={ocid}
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent className="bg-card border-border/30 rounded-2xl">
+          {options.map((opt) => (
+            <SelectItem
+              key={opt.value}
+              value={opt.value}
+              className="text-sm rounded-xl"
+            >
+              {opt.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+// ─── Full Settings Sections ───────────────────────────────────────────────────
+
+function SettingsSections() {
+  const clearWatchHistory = useClearWatchHistory();
+
+  // Persist all settings to localStorage
+  const [showOnlineStatus, setShowOnlineStatus] = useLocalStorage(
+    "settings.showOnlineStatus",
+    true,
+  );
+  const [allowComments, setAllowComments] = useLocalStorage(
+    "settings.allowComments",
+    true,
+  );
+  const [allowDownloads, setAllowDownloads] = useLocalStorage(
+    "settings.allowDownloads",
+    false,
+  );
+  const [showSubscriptions, setShowSubscriptions] = useLocalStorage(
+    "settings.showSubscriptions",
+    false,
+  );
+  const [privateAccount, setPrivateAccount] = useLocalStorage(
+    "settings.privateAccount",
+    false,
+  );
+  const [blockedUsersOpen, setBlockedUsersOpen] = useState(false);
+
+  const [pushNotifications, setPushNotifications] = useLocalStorage(
+    "settings.pushNotifications",
+    true,
+  );
+  const [emailNotifications, setEmailNotifications] = useLocalStorage(
+    "settings.emailNotifications",
+    false,
+  );
+  const [subscriberAlerts, setSubscriberAlerts] = useLocalStorage(
+    "settings.subscriberAlerts",
+    true,
+  );
+  const [commentNotifications, setCommentNotifications] = useLocalStorage(
+    "settings.commentNotifications",
+    true,
+  );
+  const [likeNotifications, setLikeNotifications] = useLocalStorage(
+    "settings.likeNotifications",
+    true,
+  );
+  const [newVideoNotifications, setNewVideoNotifications] = useLocalStorage(
+    "settings.newVideoNotifications",
+    true,
+  );
+
+  const [videoQuality, setVideoQuality] = useLocalStorage(
+    "settings.videoQuality",
+    "auto",
+  );
+  const [autoplay, setAutoplay] = useLocalStorage("settings.autoplay", true);
+  const [subtitlesDefault, setSubtitlesDefault] = useLocalStorage(
+    "settings.subtitlesDefault",
+    false,
+  );
+  const [playbackSpeed, setPlaybackSpeed] = useLocalStorage(
+    "settings.playbackSpeed",
+    "1",
+  );
+  const [audioQuality, setAudioQuality] = useLocalStorage(
+    "settings.audioQuality",
+    "auto",
+  );
+
+  const [darkMode, setDarkMode] = useLocalStorage("settings.darkMode", true);
+  const [dataSaver, setDataSaver] = useLocalStorage(
+    "settings.dataSaver",
+    false,
+  );
+  const [reduceAnimations, setReduceAnimations] = useLocalStorage(
+    "settings.reduceAnimations",
+    false,
+  );
+  const [restrictedMode, setRestrictedMode] = useLocalStorage(
+    "settings.restrictedMode",
+    false,
+  );
+
+  const notify = () => toast.success("Settings updated", { duration: 1500 });
+
+  const handleToggle =
+    <T,>(setter: (v: T) => void) =>
+    (v: T) => {
+      setter(v);
+      notify();
+    };
+
+  const handleSelect = (setter: (v: string) => void) => (v: string) => {
+    setter(v);
+    notify();
+  };
+
+  const handleClearCache = () => {
+    toast.success("Cache cleared", { duration: 2000 });
+  };
+
+  const handleClearWatchHistory = async () => {
+    try {
+      await clearWatchHistory.mutateAsync();
+      toast.success("Watch history cleared", { duration: 2000 });
+    } catch {
+      toast.error("Failed to clear watch history");
+    }
+  };
+
+  return (
+    <div className="space-y-1">
+      {/* ── Privacy ── */}
+      <SettingsDivider label="Privacy" />
+
+      <div className="bg-secondary/20 rounded-2xl px-4 divide-y divide-white/5">
+        <SettingsToggleRow
+          label="Show my online status"
+          ocid="settings.privacy.show_online_status.switch"
+          checked={showOnlineStatus}
+          onCheckedChange={handleToggle(setShowOnlineStatus)}
+        />
+        <SettingsToggleRow
+          label="Allow comments on my videos"
+          ocid="settings.privacy.allow_comments.switch"
+          checked={allowComments}
+          onCheckedChange={handleToggle(setAllowComments)}
+        />
+        <SettingsToggleRow
+          label="Allow downloads"
+          ocid="settings.privacy.allow_downloads.switch"
+          checked={allowDownloads}
+          onCheckedChange={handleToggle(setAllowDownloads)}
+        />
+        <SettingsToggleRow
+          label="Show subscription list publicly"
+          ocid="settings.privacy.show_subscriptions.switch"
+          checked={showSubscriptions}
+          onCheckedChange={handleToggle(setShowSubscriptions)}
+        />
+        <SettingsToggleRow
+          label="Private account"
+          description="Only followers can see your content"
+          ocid="settings.privacy.private_account.switch"
+          checked={privateAccount}
+          onCheckedChange={handleToggle(setPrivateAccount)}
+        />
+        {/* Blocked users row */}
+        <div className="flex items-center justify-between gap-3 py-2.5">
+          <div className="flex items-center gap-2">
+            <Ban className="w-4 h-4 text-muted-foreground" />
+            <Label className="text-sm font-medium text-foreground">
+              Blocked Users
+            </Label>
+          </div>
+          <button
+            type="button"
+            onClick={() => setBlockedUsersOpen(true)}
+            className="text-xs text-primary font-semibold hover:text-primary/80 transition-colors px-3 py-1.5 bg-primary/10 rounded-xl"
+            data-ocid="settings.privacy.blocked_users.button"
+          >
+            Manage
+          </button>
+        </div>
+      </div>
+
+      {/* ── Notifications ── */}
+      <SettingsDivider label="Notifications" />
+
+      <div className="bg-secondary/20 rounded-2xl px-4 divide-y divide-white/5">
+        <SettingsToggleRow
+          label="Push notifications"
+          ocid="settings.notifications.push.switch"
+          checked={pushNotifications}
+          onCheckedChange={handleToggle(setPushNotifications)}
+        />
+        <SettingsToggleRow
+          label="Email notifications"
+          ocid="settings.notifications.email.switch"
+          checked={emailNotifications}
+          onCheckedChange={handleToggle(setEmailNotifications)}
+        />
+        <SettingsToggleRow
+          label="New subscriber alerts"
+          ocid="settings.notifications.subscribers.switch"
+          checked={subscriberAlerts}
+          onCheckedChange={handleToggle(setSubscriberAlerts)}
+        />
+        <SettingsToggleRow
+          label="Comment notifications"
+          ocid="settings.notifications.comments.switch"
+          checked={commentNotifications}
+          onCheckedChange={handleToggle(setCommentNotifications)}
+        />
+        <SettingsToggleRow
+          label="Like notifications"
+          ocid="settings.notifications.likes.switch"
+          checked={likeNotifications}
+          onCheckedChange={handleToggle(setLikeNotifications)}
+        />
+        <SettingsToggleRow
+          label="New videos from subscribed creators"
+          ocid="settings.notifications.new_videos.switch"
+          checked={newVideoNotifications}
+          onCheckedChange={handleToggle(setNewVideoNotifications)}
+        />
+      </div>
+
+      {/* ── Video & Audio Preferences ── */}
+      <SettingsDivider label="Video & Audio Preferences" />
+
+      <div className="bg-secondary/20 rounded-2xl px-4 divide-y divide-white/5">
+        <SettingsSelectRow
+          label="Default quality"
+          ocid="settings.video.quality.select"
+          value={videoQuality}
+          onValueChange={handleSelect(setVideoQuality)}
+          options={[
+            { value: "auto", label: "Auto" },
+            { value: "1080p", label: "1080p" },
+            { value: "720p", label: "720p" },
+            { value: "480p", label: "480p" },
+          ]}
+        />
+        <SettingsToggleRow
+          label="Autoplay"
+          ocid="settings.video.autoplay.switch"
+          checked={autoplay}
+          onCheckedChange={handleToggle(setAutoplay)}
+        />
+        <SettingsToggleRow
+          label="Subtitles on by default"
+          ocid="settings.video.subtitles_default.switch"
+          checked={subtitlesDefault}
+          onCheckedChange={handleToggle(setSubtitlesDefault)}
+        />
+        <SettingsSelectRow
+          label="Playback speed"
+          ocid="settings.video.playback_speed.select"
+          value={playbackSpeed}
+          onValueChange={handleSelect(setPlaybackSpeed)}
+          options={[
+            { value: "0.5", label: "0.5×" },
+            { value: "0.75", label: "0.75×" },
+            { value: "1", label: "1×" },
+            { value: "1.25", label: "1.25×" },
+            { value: "1.5", label: "1.5×" },
+            { value: "2", label: "2×" },
+          ]}
+        />
+        <SettingsSelectRow
+          label="Audio quality"
+          ocid="settings.video.audio_quality.select"
+          value={audioQuality}
+          onValueChange={handleSelect(setAudioQuality)}
+          options={[
+            { value: "auto", label: "Auto" },
+            { value: "high", label: "High" },
+            { value: "medium", label: "Medium" },
+            { value: "low", label: "Low" },
+          ]}
+        />
+      </div>
+
+      {/* ── App Preferences ── */}
+      <SettingsDivider label="App Preferences" />
+
+      <div className="bg-secondary/20 rounded-2xl px-4 divide-y divide-white/5">
+        <SettingsToggleRow
+          label="Dark mode"
+          ocid="settings.app.dark_mode.switch"
+          checked={darkMode}
+          onCheckedChange={handleToggle(setDarkMode)}
+        />
+        <SettingsToggleRow
+          label="Data saver mode"
+          description="Reduces video quality to save mobile data"
+          ocid="settings.app.data_saver.switch"
+          checked={dataSaver}
+          onCheckedChange={handleToggle(setDataSaver)}
+        />
+        <SettingsToggleRow
+          label="Reduce animations"
+          ocid="settings.app.reduce_animations.switch"
+          checked={reduceAnimations}
+          onCheckedChange={handleToggle(setReduceAnimations)}
+        />
+        <SettingsToggleRow
+          label="Restricted mode"
+          description="Filters potentially mature content"
+          ocid="settings.app.restricted_mode.switch"
+          checked={restrictedMode}
+          onCheckedChange={handleToggle(setRestrictedMode)}
+        />
+      </div>
+
+      {/* ── Storage ── */}
+      <SettingsDivider label="Storage" />
+
+      <div className="bg-secondary/20 rounded-2xl px-4 space-y-0 divide-y divide-white/5">
+        {/* Storage used */}
+        <div className="flex items-center justify-between gap-3 py-3">
+          <div className="flex items-center gap-2">
+            <HardDrive className="w-4 h-4 text-muted-foreground" />
+            <span className="text-sm font-medium text-foreground">
+              Storage used
+            </span>
+          </div>
+          <span className="text-sm text-muted-foreground font-mono">0 MB</span>
+        </div>
+
+        {/* Clear cache */}
+        <div className="flex items-center justify-between gap-3 py-3">
+          <div className="flex items-center gap-2">
+            <Database className="w-4 h-4 text-muted-foreground" />
+            <span className="text-sm font-medium text-foreground">
+              Cached data
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={handleClearCache}
+            className="text-xs text-primary font-semibold hover:text-primary/80 transition-colors px-3 py-1.5 bg-primary/10 rounded-xl"
+            data-ocid="settings.storage.clear_cache.button"
+          >
+            Clear Cache
+          </button>
+        </div>
+
+        {/* Clear watch history */}
+        <div className="flex items-center justify-between gap-3 py-3">
+          <div className="flex items-center gap-2">
+            <Eye className="w-4 h-4 text-muted-foreground" />
+            <span className="text-sm font-medium text-foreground">
+              Watch history
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleClearWatchHistory()}
+            disabled={clearWatchHistory.isPending}
+            className="text-xs text-destructive font-semibold hover:text-destructive/80 transition-colors px-3 py-1.5 bg-destructive/10 rounded-xl disabled:opacity-50"
+            data-ocid="settings.storage.clear_history.button"
+          >
+            {clearWatchHistory.isPending ? "Clearing…" : "Clear History"}
+          </button>
+        </div>
+      </div>
+
+      {/* ── Account ── */}
+      <SettingsDivider label="Account" />
+
+      <div className="space-y-2">
+        {/* Manage subscription */}
+        <button
+          type="button"
+          onClick={() =>
+            toast.info("Opening subscription manager…", { duration: 2500 })
+          }
+          className="w-full flex items-center gap-3 bg-secondary/30 hover:bg-secondary/50 border border-border/20 rounded-2xl px-4 py-3.5 transition-colors text-left"
+          data-ocid="settings.account.manage_subscription.button"
+        >
+          <Crown className="w-4 h-4 text-amber-400 shrink-0" />
+          <span className="text-sm font-semibold text-foreground flex-1">
+            Manage Subscription
+          </span>
+          <ChevronDown className="-rotate-90 w-4 h-4 text-muted-foreground" />
+        </button>
+
+        {/* Payment methods */}
+        <button
+          type="button"
+          onClick={() =>
+            toast.info("Opening payment methods…", { duration: 2500 })
+          }
+          className="w-full flex items-center gap-3 bg-secondary/30 hover:bg-secondary/50 border border-border/20 rounded-2xl px-4 py-3.5 transition-colors text-left"
+          data-ocid="settings.account.payment_methods.button"
+        >
+          <Film className="w-4 h-4 text-muted-foreground shrink-0" />
+          <span className="text-sm font-semibold text-foreground flex-1">
+            Payment Methods
+          </span>
+          <ChevronDown className="-rotate-90 w-4 h-4 text-muted-foreground" />
+        </button>
+
+        {/* Delete account */}
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <button
+              type="button"
+              className="w-full flex items-center gap-3 bg-destructive/8 hover:bg-destructive/15 border border-destructive/20 rounded-2xl px-4 py-3.5 transition-colors text-left"
+              data-ocid="settings.account.delete_account.button"
+            >
+              <Trash2 className="w-4 h-4 text-destructive shrink-0" />
+              <span className="text-sm font-semibold text-destructive flex-1">
+                Delete Account
+              </span>
+            </button>
+          </AlertDialogTrigger>
+          <AlertDialogContent
+            className="bg-card border-border/30 rounded-3xl"
+            data-ocid="settings.account.delete_account.dialog"
+          >
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-foreground">
+                Delete your account?
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-muted-foreground">
+                This action cannot be undone. All your videos, playlists, and
+                profile data will be permanently removed.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel
+                className="rounded-2xl border-border/30"
+                data-ocid="settings.account.delete_account.cancel_button"
+              >
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() =>
+                  toast.success("Account deletion request submitted.", {
+                    duration: 3000,
+                  })
+                }
+                className="rounded-2xl bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+                data-ocid="settings.account.delete_account.confirm_button"
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+
+      {/* Blocked users sheet */}
+      <Sheet open={blockedUsersOpen} onOpenChange={setBlockedUsersOpen}>
+        <SheetContent
+          side="bottom"
+          className="bg-card border-border/30 rounded-t-3xl p-0 max-h-[70vh]"
+          data-ocid="settings.privacy.blocked_users.sheet"
+        >
+          <SheetHeader className="px-5 pt-5 pb-4 flex flex-row items-center justify-between">
+            <SheetTitle className="text-base font-bold text-foreground">
+              Blocked Users
+            </SheetTitle>
+            <button
+              type="button"
+              onClick={() => setBlockedUsersOpen(false)}
+              className="w-8 h-8 rounded-xl bg-secondary/60 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Close"
+              data-ocid="settings.privacy.blocked_users.close_button"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </SheetHeader>
+          <div className="px-5 pb-10">
+            <div
+              className="text-center py-12 text-muted-foreground text-sm"
+              data-ocid="settings.privacy.blocked_users.empty_state"
+            >
+              No blocked users
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+    </div>
+  );
+}
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -762,15 +1375,25 @@ function PremiumSection() {
 export default function ProfilePage() {
   const { identity, clear } = useInternetIdentity();
   const { data: username, isLoading } = useGetUsername();
+  const { data: extendedProfile } = useGetExtendedProfile();
   const queryClient = useQueryClient();
   const { data: allVideos = [] } = useListVideoPosts();
+  const [editOpen, setEditOpen] = useState(false);
 
-  const displayName = username ?? "Anonymous";
+  // Use extended profile name if available, fallback to username
+  const displayName =
+    extendedProfile?.name ||
+    extendedProfile?.username ||
+    username ||
+    "Anonymous";
   const initials = displayName.slice(0, 2).toUpperCase();
   const principalStr = identity?.getPrincipal().toString() ?? "";
   const shortPrincipalStr = principalStr
     ? `${principalStr.slice(0, 8)}…${principalStr.slice(-4)}`
     : "";
+
+  const lastActiveAt = principalStr ? getActiveStatus(principalStr) : null;
+  const { isOnline, label: activeLabel } = formatActiveStatus(lastActiveAt);
 
   const handleLogout = async () => {
     await clear();
@@ -803,15 +1426,26 @@ export default function ProfilePage() {
           >
             <div className="flex items-center gap-4">
               <div className="relative">
-                <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center font-black text-xl text-white">
-                  {isLoading ? (
-                    <User2 className="w-7 h-7 text-white" />
-                  ) : (
-                    initials
-                  )}
-                </div>
-                <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-card border-2 border-primary flex items-center justify-center">
-                  <Play className="w-2 h-2 text-primary fill-primary" />
+                {extendedProfile?.avatarUrl ? (
+                  <div className="w-16 h-16 rounded-2xl overflow-hidden">
+                    <img
+                      src={extendedProfile.avatarUrl}
+                      alt={displayName}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                ) : (
+                  <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center font-black text-xl text-white">
+                    {isLoading ? (
+                      <User2 className="w-7 h-7 text-white" />
+                    ) : (
+                      initials
+                    )}
+                  </div>
+                )}
+                {/* Online status dot — bottom-right of avatar */}
+                <div className="absolute -bottom-1 -right-1">
+                  <OnlineStatusDot lastActiveAt={lastActiveAt} size="md" />
                 </div>
               </div>
               <div className="flex-1 min-w-0">
@@ -825,6 +1459,18 @@ export default function ProfilePage() {
                     <p className="font-bold text-lg text-foreground truncate">
                       @{displayName}
                     </p>
+                    {/* Bio snippet */}
+                    {extendedProfile?.bio && (
+                      <p className="text-xs text-muted-foreground truncate mt-0.5 max-w-[200px]">
+                        {extendedProfile.bio}
+                      </p>
+                    )}
+                    {/* Active status label */}
+                    <p
+                      className={`text-xs font-medium mt-0.5 ${isOnline ? "text-green-400" : "text-muted-foreground"}`}
+                    >
+                      {activeLabel}
+                    </p>
                     {shortPrincipalStr && (
                       <p
                         className="text-xs text-muted-foreground font-mono mt-0.5 truncate"
@@ -836,6 +1482,17 @@ export default function ProfilePage() {
                   </>
                 )}
               </div>
+              {/* Edit Profile button */}
+              <button
+                type="button"
+                onClick={() => setEditOpen(true)}
+                className="shrink-0 flex items-center gap-1.5 bg-white/8 hover:bg-white/14 text-white/70 hover:text-white rounded-2xl px-3 py-2 text-xs font-semibold transition-colors active:scale-95"
+                aria-label="Edit profile"
+                data-ocid="profile.edit_profile.button"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                Edit
+              </button>
             </div>
           </motion.div>
 
@@ -895,18 +1552,8 @@ export default function ProfilePage() {
               label="Settings"
               ocid="profile.settings.section"
             >
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <Settings
-                  className="w-8 h-8 text-muted-foreground mb-3"
-                  strokeWidth={1.5}
-                />
-                <p className="text-sm font-semibold text-foreground mb-1">
-                  Settings coming soon
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  App preferences and account settings will appear here.
-                </p>
-              </div>
+              <LanguageSelector />
+              <SettingsSections />
             </CollapsibleSection>
           </motion.div>
 
@@ -941,6 +1588,9 @@ export default function ProfilePage() {
           </p>
         </div>
       </main>
+
+      {/* Edit Profile Panel */}
+      <EditProfilePanel open={editOpen} onClose={() => setEditOpen(false)} />
     </div>
   );
 }

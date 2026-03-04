@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Film,
   Image as ImageIcon,
+  Images,
   Loader2,
   Upload,
   X,
@@ -55,6 +56,18 @@ export default function UploadPage() {
     const file = e.target.files?.[0];
     if (file) setThumbnailFile(file);
     e.target.value = "";
+  };
+
+  const handleGooglePhotos = () => {
+    // Opens the native media picker which includes Google Photos on Android/iOS
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (file) setThumbnailFile(file);
+    };
+    input.click();
   };
 
   const handlePublish = async () => {
@@ -128,7 +141,7 @@ export default function UploadPage() {
             <input
               ref={videoInputRef}
               type="file"
-              accept="video/*"
+              accept="*/*"
               onChange={handleVideoSelect}
               className="sr-only"
               aria-label="Select video file"
@@ -160,7 +173,7 @@ export default function UploadPage() {
                       Tap to select video
                     </p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      MP4, MOV, WebM supported
+                      All file types supported
                     </p>
                   </>
                 )}
@@ -200,53 +213,70 @@ export default function UploadPage() {
             <input
               ref={thumbnailInputRef}
               type="file"
-              accept="image/*"
+              accept="*/*"
               onChange={handleThumbnailSelect}
               className="sr-only"
               aria-label="Select thumbnail image"
             />
-            <button
-              type="button"
-              onClick={() => thumbnailInputRef.current?.click()}
-              disabled={isUploading}
-              className="relative w-full rounded-2xl border-2 border-dashed border-border/50 bg-secondary/50 hover:bg-secondary hover:border-primary/50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden"
-              data-ocid="upload.thumbnail.upload_button"
-            >
-              {thumbnailFile ? (
-                <div className="relative">
-                  <img
-                    src={URL.createObjectURL(thumbnailFile)}
-                    alt="Thumbnail preview"
-                    className="w-full aspect-video object-cover rounded-xl"
-                  />
-                  {!isUploading && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setThumbnailFile(null);
-                      }}
-                      className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/70 flex items-center justify-center text-white hover:bg-black/90"
-                      aria-label="Remove thumbnail"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-6 px-4">
-                  <div className="w-12 h-12 rounded-xl bg-secondary flex items-center justify-center mb-2">
+            {thumbnailFile ? (
+              <div className="relative rounded-2xl overflow-hidden border-2 border-border/50">
+                <img
+                  src={URL.createObjectURL(thumbnailFile)}
+                  alt="Thumbnail preview"
+                  className="w-full aspect-video object-cover"
+                />
+                {!isUploading && (
+                  <button
+                    type="button"
+                    onClick={() => setThumbnailFile(null)}
+                    className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/70 flex items-center justify-center text-white hover:bg-black/90"
+                    aria-label="Remove thumbnail"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                {/* Device picker */}
+                <button
+                  type="button"
+                  onClick={() => thumbnailInputRef.current?.click()}
+                  disabled={isUploading}
+                  className="flex flex-col items-center justify-center py-6 px-4 rounded-2xl border-2 border-dashed border-border/50 bg-secondary/50 hover:bg-secondary hover:border-primary/50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                  data-ocid="upload.thumbnail.upload_button"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-secondary flex items-center justify-center mb-2">
                     <ImageIcon className="w-5 h-5 text-muted-foreground" />
                   </div>
-                  <p className="text-sm font-medium text-foreground">
-                    Tap to add thumbnail
+                  <p className="text-xs font-semibold text-foreground">
+                    Device
                   </p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    JPG, PNG, WebP
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    All files
                   </p>
-                </div>
-              )}
-            </button>
+                </button>
+
+                {/* Google Photos picker */}
+                <button
+                  type="button"
+                  onClick={handleGooglePhotos}
+                  disabled={isUploading}
+                  className="flex flex-col items-center justify-center py-6 px-4 rounded-2xl border-2 border-dashed border-[#4285F4]/40 bg-[#4285F4]/5 hover:bg-[#4285F4]/10 hover:border-[#4285F4]/70 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4285F4] disabled:opacity-50 disabled:cursor-not-allowed"
+                  data-ocid="upload.thumbnail.google_photos_button"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center mb-2">
+                    <Images className="w-5 h-5 text-[#4285F4]" />
+                  </div>
+                  <p className="text-xs font-semibold text-foreground">
+                    Google Photos
+                  </p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Pick from album
+                  </p>
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Title */}

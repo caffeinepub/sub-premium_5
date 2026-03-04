@@ -1,13 +1,17 @@
-import { Clock, Home, Upload, User, Zap } from "lucide-react";
+import { Clock, Home, Radio, Upload, User, Zap } from "lucide-react";
 import { motion } from "motion/react";
-import { toast } from "sonner";
 
-export type TabId = "home" | "shorts" | "upload" | "history" | "profile";
+export type TabId =
+  | "home"
+  | "shorts"
+  | "upload"
+  | "live"
+  | "history"
+  | "profile";
 
 interface BottomNavProps {
   activeTab: TabId;
   onTabChange: (tab: TabId) => void;
-  isAdmin: boolean;
 }
 
 const regularTabs = [
@@ -22,25 +26,30 @@ const regularTabs = [
 
 const rightTabs = [
   {
+    id: "live" as const,
+    label: "Live",
+    icon: Radio,
+    ocid: "nav.live.link",
+    hasLiveBadge: true,
+  },
+  {
     id: "history" as const,
     label: "History",
     icon: Clock,
     ocid: "nav.history.link",
+    hasLiveBadge: false,
   },
   {
     id: "profile" as const,
     label: "Profile",
     icon: User,
     ocid: "nav.profile.link",
+    hasLiveBadge: false,
   },
 ] as const;
 
-export function BottomNav({ activeTab, onTabChange, isAdmin }: BottomNavProps) {
+export function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
   const handleUploadClick = () => {
-    if (!isAdmin) {
-      toast.error("Only admin can upload videos");
-      return;
-    }
     onTabChange("upload");
   };
 
@@ -49,6 +58,7 @@ export function BottomNav({ activeTab, onTabChange, isAdmin }: BottomNavProps) {
     label: string,
     Icon: React.ElementType,
     ocid: string,
+    hasLiveBadge?: boolean,
   ) => {
     const isActive = activeTab === id;
     return (
@@ -56,7 +66,7 @@ export function BottomNav({ activeTab, onTabChange, isAdmin }: BottomNavProps) {
         key={id}
         type="button"
         onClick={() => onTabChange(id)}
-        className="relative flex-1 flex flex-col items-center justify-center gap-0.5 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF2D2D]/50 rounded-lg mx-0.5 cursor-pointer"
+        className="relative flex-1 flex flex-col items-center justify-center gap-0.5 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF2D2D]/50 rounded-lg cursor-pointer"
         aria-label={label}
         aria-current={isActive ? "page" : undefined}
         data-ocid={ocid}
@@ -65,7 +75,7 @@ export function BottomNav({ activeTab, onTabChange, isAdmin }: BottomNavProps) {
         {isActive && (
           <motion.div
             layoutId="nav-active-indicator"
-            className="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full"
+            className="absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-0.5 rounded-full"
             style={{ background: "#FF2D2D" }}
             transition={{ type: "spring", stiffness: 500, damping: 40 }}
           />
@@ -73,16 +83,23 @@ export function BottomNav({ activeTab, onTabChange, isAdmin }: BottomNavProps) {
         <motion.div
           animate={{ scale: isActive ? 1.15 : 1 }}
           transition={{ type: "spring", stiffness: 400, damping: 30 }}
+          className="relative"
         >
           <Icon
-            className={`w-5 h-5 transition-colors duration-200 ${isActive ? "text-[#FF2D2D]" : "text-gray-500"}`}
+            className={`w-4 h-4 transition-colors duration-200 ${isActive ? "text-[#FF2D2D]" : "text-gray-500"}`}
             strokeWidth={isActive ? 2.5 : 2}
           />
+          {hasLiveBadge && (
+            <span
+              className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full"
+              style={{ background: "#FF2D2D" }}
+            />
+          )}
         </motion.div>
         <motion.span
           animate={{ color: isActive ? "#FF2D2D" : "#6b7280" }}
           transition={{ duration: 0.2 }}
-          className="text-[10px] font-semibold tracking-wide"
+          className="text-[9px] font-semibold tracking-wide"
         >
           {label}
         </motion.span>
@@ -105,7 +122,7 @@ export function BottomNav({ activeTab, onTabChange, isAdmin }: BottomNavProps) {
       <div className="flex items-stretch h-16 pb-safe">
         {/* Left tabs */}
         {regularTabs.map(({ id, label, icon: Icon, ocid }) =>
-          renderTab(id, label, Icon, ocid),
+          renderTab(id, label, Icon, ocid, false),
         )}
 
         {/* Center Upload button */}
@@ -140,8 +157,8 @@ export function BottomNav({ activeTab, onTabChange, isAdmin }: BottomNavProps) {
         </div>
 
         {/* Right tabs */}
-        {rightTabs.map(({ id, label, icon: Icon, ocid }) =>
-          renderTab(id, label, Icon, ocid),
+        {rightTabs.map(({ id, label, icon: Icon, ocid, hasLiveBadge }) =>
+          renderTab(id, label, Icon, ocid, hasLiveBadge),
         )}
       </div>
     </nav>

@@ -473,3 +473,46 @@ export function useIsPremium() {
     enabled: !!actor && !actorFetching,
   });
 }
+
+// ─── Extended Profile ─────────────────────────────────────────────────────────
+
+export function useGetExtendedProfile() {
+  const { actor, isFetching: actorFetching } = useActor();
+
+  return useQuery({
+    queryKey: ["extendedProfile"],
+    queryFn: async () => {
+      if (!actor) return null;
+      return actor.getExtendedProfile();
+    },
+    enabled: !!actor && !actorFetching,
+  });
+}
+
+export function useSaveExtendedProfile() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (profile: import("../backend.d").ExtendedProfile) => {
+      if (!actor) throw new Error("Actor not available");
+      await actor.saveExtendedProfile(profile);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["extendedProfile"] });
+      void queryClient.invalidateQueries({ queryKey: ["username"] });
+      void queryClient.invalidateQueries({ queryKey: ["currentUserProfile"] });
+    },
+  });
+}
+
+export function useCheckUsernameAvailable() {
+  const { actor } = useActor();
+
+  return useMutation({
+    mutationFn: async (username: string) => {
+      if (!actor) throw new Error("Actor not available");
+      return actor.checkUsernameAvailable(username);
+    },
+  });
+}

@@ -30,6 +30,15 @@ export interface VideoPost {
     timestamp: bigint;
     uploader: Principal;
 }
+export interface ExtendedProfile {
+    bio: string;
+    username: string;
+    expiryDate?: string;
+    name: string;
+    cardholderName?: string;
+    avatarUrl?: string;
+    maskedCardNumber?: string;
+}
 export interface AiSearchEntry {
     timestamp: bigint;
     searchQuery: string;
@@ -49,6 +58,7 @@ export enum UserRole {
 export interface backendInterface {
     addVideoToPlaylist(playlistId: bigint, videoId: bigint): Promise<void>;
     assignCallerUserRole(user: Principal, role: UserRole): Promise<void>;
+    checkUsernameAvailable(username: string): Promise<boolean>;
     clearAiSearchHistory(): Promise<void>;
     clearWatchHistory(): Promise<void>;
     createPlaylist(name: string): Promise<bigint>;
@@ -59,6 +69,7 @@ export interface backendInterface {
     getAiSearchHistory(): Promise<Array<AiSearchEntry>>;
     getCallerUserProfile(): Promise<UserProfile | null>;
     getCallerUserRole(): Promise<UserRole>;
+    getExtendedProfile(): Promise<ExtendedProfile | null>;
     getPlaylist(id: bigint): Promise<Playlist | null>;
     getSavedVideos(): Promise<Array<bigint>>;
     getSubscriptions(): Promise<Array<Principal>>;
@@ -77,6 +88,7 @@ export interface backendInterface {
     renamePlaylist(id: bigint, name: string): Promise<void>;
     saveAiSearchHistory(searchQuery: string): Promise<void>;
     saveCallerUserProfile(profile: UserProfile): Promise<void>;
+    saveExtendedProfile(profile: ExtendedProfile): Promise<void>;
     saveVideo(videoId: bigint): Promise<void>;
     setUsername(username: string): Promise<void>;
     unfollowCreator(creator: Principal): Promise<void>;

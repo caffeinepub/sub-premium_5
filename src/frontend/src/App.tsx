@@ -1,31 +1,42 @@
 import { Toaster } from "@/components/ui/sonner";
 import { Loader2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { AIAssistant } from "./components/AIAssistant";
 import { BottomNav } from "./components/BottomNav";
 import type { TabId } from "./components/BottomNav";
 import { useInternetIdentity } from "./hooks/useInternetIdentity";
-import { useGetCallerUserProfile, useIsCallerAdmin } from "./hooks/useQueries";
+import { useGetCallerUserProfile } from "./hooks/useQueries";
+import { LanguageProvider } from "./i18n/LanguageContext";
 import HistoryPage from "./pages/HistoryPage";
 import HomePage from "./pages/HomePage";
+import LivePage from "./pages/LivePage";
 import LoginPage from "./pages/LoginPage";
 import ProfilePage from "./pages/ProfilePage";
 import SetupProfilePage from "./pages/SetupProfilePage";
 import ShortsPage from "./pages/ShortsPage";
 import UploadPage from "./pages/UploadPage";
+import { updateActiveStatus } from "./utils/activeStatus";
 
-export default function App() {
+function AppInner() {
   const [activeTab, setActiveTab] = useState<TabId>("home");
   const { identity, isInitializing } = useInternetIdentity();
   const isAuthenticated = !!identity;
+
+  // Track active status — update on mount and every 60 seconds
+  useEffect(() => {
+    const principalId = identity?.getPrincipal().toString();
+    if (!principalId) return;
+    updateActiveStatus(principalId);
+    const interval = setInterval(() => updateActiveStatus(principalId), 60_000);
+    return () => clearInterval(interval);
+  }, [identity]);
 
   const {
     data: userProfile,
     isLoading: profileLoading,
     isFetched: profileFetched,
   } = useGetCallerUserProfile();
-
-  const { data: isAdmin = false } = useIsCallerAdmin();
 
   // Show full-screen loading while initializing auth
   if (isInitializing) {
@@ -86,6 +97,8 @@ export default function App() {
         return <ShortsPage key="shorts" />;
       case "upload":
         return <UploadPage key="upload" />;
+      case "live":
+        return <LivePage key="live" />;
       case "history":
         return <HistoryPage key="history" />;
       case "profile":
@@ -125,15 +138,22 @@ export default function App() {
           </div>
 
           {/* Bottom navigation */}
-          <BottomNav
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-            isAdmin={isAdmin}
-          />
+          <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
+
+          {/* Floating AI Assistant */}
+          <AIAssistant />
         </div>
       </div>
 
       <Toaster position="top-center" richColors />
     </>
+  );
+}
+
+export default function App() {
+  return (
+    <LanguageProvider>
+      <AppInner />
+    </LanguageProvider>
   );
 }
