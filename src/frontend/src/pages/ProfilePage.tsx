@@ -45,8 +45,10 @@ import {
   Play,
   Plus,
   Settings,
+  Shield,
   Trash2,
   User2,
+  Wallet,
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -56,6 +58,7 @@ import type { Playlist, VideoPost } from "../backend.d";
 import { EditProfilePanel } from "../components/EditProfilePanel";
 import { LanguageSelector } from "../components/LanguageSelector";
 import { OnlineStatusDot } from "../components/OnlineStatusDot";
+import { useActor } from "../hooks/useActor";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import {
   useClearWatchHistory,
@@ -184,7 +187,13 @@ function SettingsSelectRow({
 
 // ─── Full Settings Sections ───────────────────────────────────────────────────
 
-function SettingsSections() {
+function SettingsSections({
+  isAdmin = false,
+  onAdminDashboard,
+}: {
+  isAdmin?: boolean;
+  onAdminDashboard?: () => void;
+}) {
   const clearWatchHistory = useClearWatchHistory();
 
   // Persist all settings to localStorage
@@ -537,6 +546,26 @@ function SettingsSections() {
       <SettingsDivider label="Account" />
 
       <div className="space-y-2">
+        {/* Admin Dashboard — only shown to admins */}
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => onAdminDashboard?.()}
+            className="w-full flex items-center gap-3 rounded-2xl px-4 py-3.5 transition-colors text-left"
+            style={{
+              background: "rgba(255,45,45,0.08)",
+              border: "1px solid rgba(255,45,45,0.2)",
+            }}
+            data-ocid="settings.account.admin_dashboard.button"
+          >
+            <Shield className="w-4 h-4 text-red-400 shrink-0" />
+            <span className="text-sm font-semibold text-red-400 flex-1">
+              Admin Dashboard
+            </span>
+            <ChevronDown className="-rotate-90 w-4 h-4 text-red-400/60" />
+          </button>
+        )}
+
         {/* Manage subscription */}
         <button
           type="button"
@@ -1372,8 +1401,18 @@ function PremiumSection() {
 
 // ─── Main ProfilePage ─────────────────────────────────────────────────────────
 
-export default function ProfilePage() {
+interface ProfilePageProps {
+  onWalletNavigate?: () => void;
+  onAdminDashboard?: () => void;
+}
+
+export default function ProfilePage({
+  onWalletNavigate,
+  onAdminDashboard,
+}: ProfilePageProps) {
   const { identity, clear } = useInternetIdentity();
+  const { actor } = useActor();
+  const [isAdmin, setIsAdmin] = useState(false);
   const { data: username, isLoading } = useGetUsername();
   const { data: extendedProfile } = useGetExtendedProfile();
   const queryClient = useQueryClient();
@@ -1394,6 +1433,15 @@ export default function ProfilePage() {
 
   const lastActiveAt = principalStr ? getActiveStatus(principalStr) : null;
   const { isOnline, label: activeLabel } = formatActiveStatus(lastActiveAt);
+
+  // Check admin status
+  useEffect(() => {
+    if (!actor) return;
+    actor
+      .isCallerAdmin()
+      .then((admin) => setIsAdmin(admin))
+      .catch(() => setIsAdmin(false));
+  }, [actor]);
 
   const handleLogout = async () => {
     await clear();
@@ -1482,17 +1530,29 @@ export default function ProfilePage() {
                   </>
                 )}
               </div>
-              {/* Edit Profile button */}
-              <button
-                type="button"
-                onClick={() => setEditOpen(true)}
-                className="shrink-0 flex items-center gap-1.5 bg-white/8 hover:bg-white/14 text-white/70 hover:text-white rounded-2xl px-3 py-2 text-xs font-semibold transition-colors active:scale-95"
-                aria-label="Edit profile"
-                data-ocid="profile.edit_profile.button"
-              >
-                <Pencil className="w-3.5 h-3.5" />
-                Edit
-              </button>
+              {/* Action buttons */}
+              <div className="flex flex-col gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setEditOpen(true)}
+                  className="flex items-center gap-1.5 bg-white/8 hover:bg-white/14 text-white/70 hover:text-white rounded-2xl px-3 py-2 text-xs font-semibold transition-colors active:scale-95"
+                  aria-label="Edit profile"
+                  data-ocid="profile.edit_profile.button"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onWalletNavigate?.()}
+                  className="flex items-center gap-1.5 bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 hover:text-yellow-300 rounded-2xl px-3 py-2 text-xs font-semibold transition-colors active:scale-95"
+                  aria-label="My Wallet"
+                  data-ocid="profile.wallet.button"
+                >
+                  <Wallet className="w-3.5 h-3.5" />
+                  Wallet
+                </button>
+              </div>
             </div>
           </motion.div>
 
@@ -1553,7 +1613,10 @@ export default function ProfilePage() {
               ocid="profile.settings.section"
             >
               <LanguageSelector />
-              <SettingsSections />
+              <SettingsSections
+                isAdmin={isAdmin}
+                onAdminDashboard={onAdminDashboard}
+              />
             </CollapsibleSection>
           </motion.div>
 

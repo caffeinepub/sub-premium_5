@@ -9,6 +9,7 @@ import {
   Heart,
   Loader2,
   MessageCircle,
+  Radio,
   Share2,
   UserPlus,
   Zap,
@@ -254,7 +255,11 @@ function ShortVideo({
 
 // ─── ShortsPage ───────────────────────────────────────────────────────────────
 
-export default function ShortsPage() {
+interface ShortsPageProps {
+  onGoLive?: () => void;
+}
+
+export default function ShortsPage({ onGoLive }: ShortsPageProps) {
   const { data: videos, isLoading } = useListVideoPosts();
   const { data: subscriptions = [] } = useGetSubscriptions();
   const followCreator = useFollowCreator();
@@ -344,6 +349,23 @@ export default function ShortsPage() {
         className="h-full flex flex-col items-center justify-center bg-black text-center px-8"
         data-ocid="shorts.page"
       >
+        {/* LIVE button top-right */}
+        {onGoLive && (
+          <button
+            type="button"
+            data-ocid="shorts.go_live.button"
+            onClick={onGoLive}
+            className="absolute top-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-full z-10"
+            style={{ background: "#FF2D2D" }}
+          >
+            <span className="relative flex w-2 h-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
+              <span className="relative inline-flex rounded-full w-2 h-2 bg-white" />
+            </span>
+            <Radio className="w-3.5 h-3.5 text-white" />
+            <span className="text-white text-xs font-black">LIVE</span>
+          </button>
+        )}
         <div
           data-ocid="shorts.empty_state"
           className="flex flex-col items-center"
@@ -391,6 +413,27 @@ export default function ShortsPage() {
           />
         </motion.div>
       </AnimatePresence>
+
+      {/* LIVE button top-right */}
+      {onGoLive && (
+        <button
+          type="button"
+          data-ocid="shorts.go_live.button"
+          onClick={onGoLive}
+          className="absolute top-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-full z-20"
+          style={{
+            background: "#FF2D2D",
+            boxShadow: "0 0 16px rgba(255,45,45,0.5)",
+          }}
+        >
+          <span className="relative flex w-2 h-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
+            <span className="relative inline-flex rounded-full w-2 h-2 bg-white" />
+          </span>
+          <Radio className="w-3.5 h-3.5 text-white" />
+          <span className="text-white text-xs font-black">LIVE</span>
+        </button>
+      )}
 
       {/* Progress dots on right edge */}
       <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex flex-col gap-1.5 z-20 pointer-events-none">

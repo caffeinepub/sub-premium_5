@@ -8,22 +8,59 @@ import type { TabId } from "./components/BottomNav";
 import { useInternetIdentity } from "./hooks/useInternetIdentity";
 import { useGetCallerUserProfile } from "./hooks/useQueries";
 import { LanguageProvider } from "./i18n/LanguageContext";
+import AdminDashboardPage from "./pages/AdminDashboardPage";
+import BattleHistoryPage from "./pages/BattleHistoryPage";
 import HistoryPage from "./pages/HistoryPage";
 import HomePage from "./pages/HomePage";
+import LiveAnalyticsPage from "./pages/LiveAnalyticsPage";
+import LiveCountdownPage from "./pages/LiveCountdownPage";
 import LivePage from "./pages/LivePage";
+import LiveReplayPage from "./pages/LiveReplayPage";
+import LiveVerticalSetupPage from "./pages/LiveVerticalSetupPage";
+import LiveWatchPage from "./pages/LiveWatchPage";
 import LoginPage from "./pages/LoginPage";
 import ProfilePage from "./pages/ProfilePage";
+import RechargePage from "./pages/RechargePage";
 import SetupProfilePage from "./pages/SetupProfilePage";
+import ShortsCreatePage from "./pages/ShortsCreatePage";
 import ShortsPage from "./pages/ShortsPage";
 import UploadPage from "./pages/UploadPage";
+import WalletPage from "./pages/WalletPage";
+import WeeklyLeaderboardPage from "./pages/WeeklyLeaderboardPage";
+import WithdrawPage from "./pages/WithdrawPage";
 import { updateActiveStatus } from "./utils/activeStatus";
+
+// ─── Sub-route types ──────────────────────────────────────────────────────────
+
+type LiveSubRoute =
+  | { type: "setup" }
+  | { type: "vertical-setup"; streamId: bigint }
+  | { type: "countdown"; streamId: bigint }
+  | {
+      type: "watch";
+      streamId: bigint;
+      isCreator?: boolean;
+      streamTitle?: string;
+    }
+  | { type: "analytics"; streamId: bigint }
+  | { type: "replay"; streamId: bigint }
+  | { type: "battle-history" }
+  | { type: "weekly-leaderboard" }
+  | null;
+
+type ShortsSubRoute = { type: "create" } | null;
+
+type WalletSubRoute = "main" | "recharge" | "withdraw" | "admin" | null;
 
 function AppInner() {
   const [activeTab, setActiveTab] = useState<TabId>("home");
+  const [liveSubRoute, setLiveSubRoute] = useState<LiveSubRoute>(null);
+  const [shortsSubRoute, setShortsSubRoute] = useState<ShortsSubRoute>(null);
+  const [walletSubRoute, setWalletSubRoute] = useState<WalletSubRoute>(null);
   const { identity, isInitializing } = useInternetIdentity();
   const isAuthenticated = !!identity;
 
-  // Track active status — update on mount and every 60 seconds
+  // Track active status
   useEffect(() => {
     const principalId = identity?.getPrincipal().toString();
     if (!principalId) return;
@@ -38,7 +75,6 @@ function AppInner() {
     isFetched: profileFetched,
   } = useGetCallerUserProfile();
 
-  // Show full-screen loading while initializing auth
   if (isInitializing) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -50,7 +86,6 @@ function AppInner() {
     );
   }
 
-  // Not authenticated → show login
   if (!isAuthenticated) {
     return (
       <>
@@ -60,7 +95,6 @@ function AppInner() {
     );
   }
 
-  // Authenticated but profile still loading → show spinner
   if (profileLoading && !profileFetched) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -72,7 +106,6 @@ function AppInner() {
     );
   }
 
-  // Authenticated but no profile → profile setup
   const showProfileSetup =
     isAuthenticated &&
     !profileLoading &&
@@ -88,33 +121,237 @@ function AppInner() {
     );
   }
 
-  // Main app
+  // ─── Navigation helpers ───────────────────────────────────────────────────
+
+  const navigateToTab = (tab: TabId) => {
+    setActiveTab(tab);
+    setLiveSubRoute(null);
+    setShortsSubRoute(null);
+    setWalletSubRoute(null);
+  };
+
+  // Whether we're in a full-screen sub-route (hide bottom nav)
+  const isFullScreenRoute =
+    walletSubRoute !== null ||
+    (activeTab === "live" &&
+      liveSubRoute !== null &&
+      liveSubRoute.type !== "setup") ||
+    (activeTab === "shorts" && shortsSubRoute !== null);
+
+  // ─── Page renderer ────────────────────────────────────────────────────────
+
   const renderPage = () => {
+    // WALLET sub-routes (full-screen, hide bottom nav)
+    if (walletSubRoute === "main") {
+      return (
+        <WalletPage
+          key="wallet-main"
+          onBack={() => setWalletSubRoute(null)}
+          onRecharge={() => setWalletSubRoute("recharge")}
+          onWithdraw={() => setWalletSubRoute("withdraw")}
+        />
+      );
+    }
+    if (walletSubRoute === "recharge") {
+      return (
+        <RechargePage
+          key="wallet-recharge"
+          onBack={() => setWalletSubRoute("main")}
+        />
+      );
+    }
+    if (walletSubRoute === "withdraw") {
+      return (
+        <WithdrawPage
+          key="wallet-withdraw"
+          onBack={() => setWalletSubRoute("main")}
+        />
+      );
+    }
+    if (walletSubRoute === "admin") {
+      return (
+        <AdminDashboardPage
+          key="admin-dashboard"
+          onBack={() => setWalletSubRoute(null)}
+        />
+      );
+    }
+
+    // SHORTS sub-routes
+    if (activeTab === "shorts" && shortsSubRoute?.type === "create") {
+      return (
+        <ShortsCreatePage
+          key="shorts-create"
+          onBack={() => setShortsSubRoute(null)}
+          onGoLive={(streamId) => {
+            setShortsSubRoute(null);
+            setActiveTab("live");
+            setLiveSubRoute({ type: "vertical-setup", streamId });
+          }}
+        />
+      );
+    }
+
+    // LIVE sub-routes
+    if (activeTab === "live" && liveSubRoute !== null) {
+      switch (liveSubRoute.type) {
+        case "setup":
+          return (
+            <LivePage
+              key="live-setup"
+              onNavigateToWatch={(streamId) =>
+                setLiveSubRoute({ type: "watch", streamId, isCreator: false })
+              }
+              onNavigateToSetup={() =>
+                setLiveSubRoute({
+                  type: "vertical-setup",
+                  streamId: BigInt(Date.now()),
+                })
+              }
+            />
+          );
+
+        case "vertical-setup":
+          return (
+            <LiveVerticalSetupPage
+              key="live-vertical-setup"
+              streamId={liveSubRoute.streamId}
+              onBack={() => setLiveSubRoute(null)}
+              onGoLive={() =>
+                setLiveSubRoute({
+                  type: "countdown",
+                  streamId: liveSubRoute.streamId,
+                })
+              }
+            />
+          );
+
+        case "countdown":
+          return (
+            <LiveCountdownPage
+              key="live-countdown"
+              streamId={liveSubRoute.streamId}
+              onCancel={() => setLiveSubRoute(null)}
+              onLive={() =>
+                setLiveSubRoute({
+                  type: "watch",
+                  streamId: liveSubRoute.streamId,
+                  isCreator: true,
+                })
+              }
+            />
+          );
+
+        case "watch":
+          return (
+            <LiveWatchPage
+              key={`live-watch-${liveSubRoute.streamId.toString()}`}
+              streamId={liveSubRoute.streamId}
+              isCreator={liveSubRoute.isCreator ?? false}
+              streamTitle={liveSubRoute.streamTitle}
+              onBack={() => setLiveSubRoute(null)}
+              onEndStream={() =>
+                setLiveSubRoute({
+                  type: "analytics",
+                  streamId: liveSubRoute.streamId,
+                })
+              }
+              onNavigateToWallet={() => {
+                setLiveSubRoute(null);
+                setWalletSubRoute("main");
+              }}
+              onBattleHistory={() =>
+                setLiveSubRoute({ type: "battle-history" })
+              }
+              onWeeklyLeaderboard={() =>
+                setLiveSubRoute({ type: "weekly-leaderboard" })
+              }
+            />
+          );
+
+        case "analytics":
+          return (
+            <LiveAnalyticsPage
+              key="live-analytics"
+              streamId={liveSubRoute.streamId}
+              onBack={() => setLiveSubRoute(null)}
+              onDelete={() => setLiveSubRoute(null)}
+            />
+          );
+
+        case "replay":
+          return (
+            <LiveReplayPage
+              key="live-replay"
+              streamId={liveSubRoute.streamId}
+              onBack={() => setLiveSubRoute(null)}
+            />
+          );
+
+        case "battle-history":
+          return (
+            <BattleHistoryPage
+              key="battle-history"
+              onBack={() => setLiveSubRoute(null)}
+            />
+          );
+
+        case "weekly-leaderboard":
+          return (
+            <WeeklyLeaderboardPage
+              key="weekly-leaderboard"
+              onBack={() => setLiveSubRoute(null)}
+            />
+          );
+      }
+    }
+
+    // Default tab pages
     switch (activeTab) {
       case "home":
         return <HomePage key="home" />;
       case "shorts":
-        return <ShortsPage key="shorts" />;
+        return (
+          <ShortsPage
+            key="shorts"
+            onGoLive={() => setShortsSubRoute({ type: "create" })}
+          />
+        );
       case "upload":
         return <UploadPage key="upload" />;
       case "live":
-        return <LivePage key="live" />;
+        return (
+          <LivePage
+            key="live"
+            onNavigateToWatch={(streamId) =>
+              setLiveSubRoute({ type: "watch", streamId, isCreator: false })
+            }
+            onNavigateToSetup={() => {
+              const mockId = BigInt(Date.now());
+              setLiveSubRoute({ type: "vertical-setup", streamId: mockId });
+            }}
+          />
+        );
       case "history":
         return <HistoryPage key="history" />;
       case "profile":
-        return <ProfilePage key="profile" />;
+        return (
+          <ProfilePage
+            key="profile"
+            onWalletNavigate={() => setWalletSubRoute("main")}
+            onAdminDashboard={() => setWalletSubRoute("admin")}
+          />
+        );
       default:
         return <HomePage key="home" />;
     }
   };
 
-  // Shorts page is full-screen — no animation wrapper padding
-  const isShortsPage = activeTab === "shorts";
+  const isShortsPage = activeTab === "shorts" && !shortsSubRoute;
 
   return (
     <>
       <div className="flex justify-center min-h-screen bg-[oklch(0.07_0_0)]">
-        {/* Mobile container */}
         <div
           className="relative flex flex-col bg-background w-full max-w-[430px] min-h-screen overflow-hidden"
           style={{ boxShadow: "0 0 60px oklch(0 0 0 / 0.5)" }}
@@ -125,10 +362,16 @@ function AppInner() {
           >
             <AnimatePresence mode="wait">
               <motion.div
-                key={activeTab}
-                initial={{ opacity: 0, x: isShortsPage ? 0 : 8 }}
+                key={`${activeTab}-${liveSubRoute?.type ?? "null"}-${shortsSubRoute?.type ?? "null"}`}
+                initial={{
+                  opacity: 0,
+                  x: isShortsPage || isFullScreenRoute ? 0 : 8,
+                }}
                 animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: isShortsPage ? 0 : -8 }}
+                exit={{
+                  opacity: 0,
+                  x: isShortsPage || isFullScreenRoute ? 0 : -8,
+                }}
                 transition={{ duration: 0.18, ease: "easeInOut" }}
                 className="absolute inset-0 flex flex-col"
               >
@@ -137,11 +380,13 @@ function AppInner() {
             </AnimatePresence>
           </div>
 
-          {/* Bottom navigation */}
-          <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
+          {/* Bottom navigation — hidden in full-screen sub-routes */}
+          {!isFullScreenRoute && (
+            <BottomNav activeTab={activeTab} onTabChange={navigateToTab} />
+          )}
 
-          {/* Floating AI Assistant */}
-          <AIAssistant />
+          {/* Floating AI Assistant — hidden in full-screen sub-routes */}
+          {!isFullScreenRoute && <AIAssistant />}
         </div>
       </div>
 

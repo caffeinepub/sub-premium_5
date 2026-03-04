@@ -3,6 +3,7 @@ import Array "mo:core/Array";
 import List "mo:core/List";
 import Time "mo:core/Time";
 import Order "mo:core/Order";
+import Nat "mo:core/Nat";
 import Principal "mo:core/Principal";
 import Map "mo:core/Map";
 import Iter "mo:core/Iter";
@@ -88,7 +89,7 @@ actor {
     if (usernameChanged) {
       // Check if username is taken by another user
       let usernameLower = profile.username.toLower();
-      
+
       // Check in userProfiles
       for ((principal, userProfile) in userProfiles.entries()) {
         if (principal != caller and userProfile.username.toLower() == usernameLower) {
@@ -123,7 +124,7 @@ actor {
     // Public access - anyone including guests can check username availability
     // This is needed for registration/signup flows
     let usernameLower = username.toLower();
-    
+
     // Check in userProfiles
     for ((principal, profile) in userProfiles.entries()) {
       if (profile.username.toLower() == usernameLower) {
@@ -502,6 +503,576 @@ actor {
     switch (aiSearchHistory.get(caller)) {
       case (null) { List.empty<AiSearchEntry>() };
       case (?list) { list };
+    };
+  };
+
+  // ------------------------------------------------
+  // LIVE STREAMING SYSTEM
+  // ------------------------------------------------
+
+  public type LiveStream = {
+    id : Nat;
+    creatorId : Principal;
+    title : Text;
+    description : Text;
+    category : Text;
+    tags : [Text];
+    privacy : Text;
+    status : Text;
+    viewerCount : Nat;
+    peakViewers : Nat;
+    totalLikes : Nat;
+    totalGifts : Nat;
+    totalRevenue : Nat;
+    newFollowers : Nat;
+    chatEnabled : Bool;
+    replayEnabled : Bool;
+    monetizationEnabled : Bool;
+    startedAt : Int;
+    endedAt : ?Int;
+    scheduledAt : ?Int;
+  };
+
+  let liveStreams = Map.empty<Nat, LiveStream>();
+  var liveStreamCounter : Nat = 0;
+
+  public shared ({ caller }) func createLiveStream(
+    title : Text,
+    description : Text,
+    category : Text,
+    tags : [Text],
+    privacy : Text,
+    chatEnabled : Bool,
+    replayEnabled : Bool,
+    monetizationEnabled : Bool,
+    scheduledAt : ?Int
+  ) : async Nat {
+    checkAuthenticatedUser(caller);
+
+    let newStream : LiveStream = {
+      id = liveStreamCounter;
+      creatorId = caller;
+      title;
+      description;
+      category;
+      tags;
+      privacy;
+      status = "setup";
+      viewerCount = 0;
+      peakViewers = 0;
+      totalLikes = 0;
+      totalGifts = 0;
+      totalRevenue = 0;
+      newFollowers = 0;
+      chatEnabled;
+      replayEnabled;
+      monetizationEnabled;
+      startedAt = Time.now();
+      endedAt = null;
+      scheduledAt;
+    };
+
+    liveStreams.add(liveStreamCounter, newStream);
+    let id = liveStreamCounter;
+    liveStreamCounter += 1;
+    id;
+  };
+
+  public query ({ caller }) func getLiveStream(id : Nat) : async ?LiveStream {
+    switch (liveStreams.get(id)) {
+      case (null) { null };
+      case (?stream) {
+        // Check privacy settings
+        if (stream.privacy == "private") {
+          // Only creator and admins can view private streams
+          if (stream.creatorId != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+            Runtime.trap("Unauthorized: This is a private stream");
+          };
+        } else if (stream.privacy == "subscribers_only") {
+          // Check if caller is subscribed to creator or is the creator/admin
+          if (stream.creatorId != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+            let subscriptions = getSubscriptionsSet(caller);
+            if (not subscriptions.contains(stream.creatorId)) {
+              Runtime.trap("Unauthorized: This stream is for subscribers only");
+            };
+          };
+        };
+        // Public streams can be viewed by anyone
+        ?stream;
+      };
+    };
+  };
+
+  public query ({ caller }) func listActiveLiveStreams() : async [LiveStream] {
+    // Public access - but filter based on privacy
+    let allActive = liveStreams.values().filter(func(s) { s.status == "live" }).toArray();
+
+    // Filter based on caller's permissions
+    allActive.filter(func(stream) {
+      if (stream.privacy == "public") {
+        true;
+      } else if (stream.privacy == "subscribers_only") {
+        // Show if caller is creator, admin, or subscriber
+        stream.creatorId == caller or
+        AccessControl.isAdmin(accessControlState, caller) or
+        getSubscriptionsSet(caller).contains(stream.creatorId);
+      } else {
+        // Private - only show to creator and admins
+        stream.creatorId == caller or AccessControl.isAdmin(accessControlState, caller);
+      };
+    });
+  };
+
+  public query ({ caller }) func listAllLiveStreams() : async [LiveStream] {
+    checkAuthenticatedUser(caller);
+
+    // Filter based on privacy settings
+    liveStreams.values().toArray().filter(func(stream) {
+      if (stream.privacy == "public") {
+        true;
+      } else if (stream.privacy == "subscribers_only") {
+        stream.creatorId == caller or
+        AccessControl.isAdmin(accessControlState, caller) or
+        getSubscriptionsSet(caller).contains(stream.creatorId);
+      } else {
+        stream.creatorId == caller or AccessControl.isAdmin(accessControlState, caller);
+      };
+    });
+  };
+
+  public shared ({ caller }) func updateLiveStreamStatus(id : Nat, status : Text) : async () {
+    checkAuthenticatedUser(caller);
+    let stream = getStreamOrTrap(id, caller);
+    if (stream.creatorId != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+      Runtime.trap("Unauthorized: Only creator or admin can update status");
+    };
+    let updatedStream = { stream with status };
+    liveStreams.add(id, updatedStream);
+  };
+
+  public shared ({ caller }) func endLiveStream(id : Nat) : async () {
+    checkAuthenticatedUser(caller);
+    let stream = getStreamOrTrap(id, caller);
+    if (stream.creatorId != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+      Runtime.trap("Unauthorized: Only creator or admin can end stream");
+    };
+    let updatedStream = {
+      stream with status = "ended";
+      endedAt = ?Time.now();
+    };
+    liveStreams.add(id, updatedStream);
+  };
+
+  public shared ({ caller }) func incrementLiveViewers(id : Nat) : async () {
+    checkAuthenticatedUser(caller);
+
+    // Verify caller has access to this stream
+    switch (liveStreams.get(id)) {
+      case (null) { Runtime.trap("Live stream not found") };
+      case (?stream) {
+        // Check privacy before allowing viewer increment
+        if (stream.privacy == "private" and stream.creatorId != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+          Runtime.trap("Unauthorized: Cannot view private stream");
+        };
+        if (stream.privacy == "subscribers_only" and stream.creatorId != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+          let subscriptions = getSubscriptionsSet(caller);
+          if (not subscriptions.contains(stream.creatorId)) {
+            Runtime.trap("Unauthorized: Must be subscribed to view this stream");
+          };
+        };
+
+        let updatedStream = {
+          stream with
+          viewerCount = stream.viewerCount + 1;
+          peakViewers = if (stream.viewerCount + 1 > stream.peakViewers) {
+            stream.viewerCount + 1;
+          } else {
+            stream.peakViewers;
+          };
+        };
+        liveStreams.add(id, updatedStream);
+      };
+    };
+  };
+
+  public shared ({ caller }) func decrementLiveViewers(id : Nat) : async () {
+    checkAuthenticatedUser(caller);
+    switch (liveStreams.get(id)) {
+      case (?stream) {
+        let updatedStream = {
+          stream with
+          viewerCount = if (stream.viewerCount > 0) { stream.viewerCount - 1 } else {
+            0;
+          };
+        };
+        liveStreams.add(id, updatedStream);
+      };
+      case (null) { Runtime.trap("Live stream not found") };
+    };
+  };
+
+  public shared ({ caller }) func likeLiveStream(id : Nat) : async () {
+    checkAuthenticatedUser(caller);
+
+    // Verify caller has access to this stream
+    switch (liveStreams.get(id)) {
+      case (null) { Runtime.trap("Live stream not found") };
+      case (?stream) {
+        // Check privacy before allowing like
+        if (stream.privacy == "private" and stream.creatorId != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+          Runtime.trap("Unauthorized: Cannot like private stream");
+        };
+        if (stream.privacy == "subscribers_only" and stream.creatorId != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+          let subscriptions = getSubscriptionsSet(caller);
+          if (not subscriptions.contains(stream.creatorId)) {
+            Runtime.trap("Unauthorized: Must be subscribed to like this stream");
+          };
+        };
+
+        let updatedStream = {
+          stream with totalLikes = stream.totalLikes + 1;
+        };
+        liveStreams.add(id, updatedStream);
+      };
+    };
+  };
+
+  public query ({ caller }) func getMyLiveStreams() : async [LiveStream] {
+    checkAuthenticatedUser(caller);
+    liveStreams.values().filter(func(s) { s.creatorId == caller }).toArray();
+  };
+
+  // ------------ Live Chat Messages -------------
+
+  public type LiveChatMessage = {
+    id : Nat;
+    streamId : Nat;
+    sender : Principal;
+    senderUsername : Text;
+    text : Text;
+    messageType : Text;
+    timestamp : Int;
+  };
+
+  let chatMessages = Map.empty<Nat, List.List<LiveChatMessage>>();
+  var chatMessageCounter : Nat = 0;
+
+  public shared ({ caller }) func sendChatMessage(
+    streamId : Nat,
+    text : Text,
+    messageType : Text
+  ) : async Nat {
+    checkAuthenticatedUser(caller);
+
+    // Verify stream exists and chat is enabled
+    let stream = getStreamOrTrap(streamId, caller);
+    if (not stream.chatEnabled) {
+      Runtime.trap("Chat is disabled for this stream");
+    };
+
+    // Check privacy - only allowed viewers can send messages
+    if (stream.privacy == "private" and stream.creatorId != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+      Runtime.trap("Unauthorized: Cannot chat in private stream");
+    };
+    if (stream.privacy == "subscribers_only" and stream.creatorId != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+      let subscriptions = getSubscriptionsSet(caller);
+      if (not subscriptions.contains(stream.creatorId)) {
+        Runtime.trap("Unauthorized: Must be subscribed to chat in this stream");
+      };
+    };
+
+    let username = switch (userProfiles.get(caller)) {
+      case (null) { "Guest" };
+      case (?profile) { profile.username };
+    };
+
+    let newMessage : LiveChatMessage = {
+      id = chatMessageCounter;
+      streamId;
+      sender = caller;
+      senderUsername = username;
+      text;
+      messageType;
+      timestamp = Time.now();
+    };
+
+    let messagesList = getChatMessageList(streamId);
+    messagesList.add(newMessage);
+    chatMessages.add(streamId, messagesList);
+
+    let id = chatMessageCounter;
+    chatMessageCounter += 1;
+    id;
+  };
+
+  public query ({ caller }) func getChatMessages(streamId : Nat) : async [LiveChatMessage] {
+    // Verify caller has access to view this stream's chat
+    switch (liveStreams.get(streamId)) {
+      case (null) { Runtime.trap("Live stream not found") };
+      case (?stream) {
+        // Check privacy settings
+        if (stream.privacy == "private") {
+          if (stream.creatorId != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+            Runtime.trap("Unauthorized: Cannot view chat of private stream");
+          };
+        } else if (stream.privacy == "subscribers_only") {
+          if (stream.creatorId != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+            let subscriptions = getSubscriptionsSet(caller);
+            if (not subscriptions.contains(stream.creatorId)) {
+              Runtime.trap("Unauthorized: Must be subscribed to view chat");
+            };
+          };
+        };
+
+        getChatMessageList(streamId).toArray();
+      };
+    };
+  };
+
+  public shared ({ caller }) func pinChatMessage(streamId : Nat, messageId : Nat) : async () {
+    checkAuthenticatedUser(caller);
+    let stream = getStreamOrTrap(streamId, caller);
+    if (stream.creatorId != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+      Runtime.trap("Unauthorized: Only creator or admin can pin messages");
+    };
+
+    let messagesList = getChatMessageList(streamId);
+    let mappedMessages = messagesList.toArray().map(
+      func(msg) {
+        if (msg.id == messageId) {
+          { msg with messageType = "pinned" };
+        } else {
+          msg;
+        };
+      }
+    );
+    chatMessages.add(streamId, List.fromArray<LiveChatMessage>(mappedMessages));
+  };
+
+  public shared ({ caller }) func deleteChatMessage(streamId : Nat, messageId : Nat) : async () {
+    checkAuthenticatedUser(caller);
+    let stream = getStreamOrTrap(streamId, caller);
+    if (stream.creatorId != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+      Runtime.trap("Unauthorized: Only creator or admin can delete messages");
+    };
+
+    let messagesList = getChatMessageList(streamId);
+    let filteredMessages = messagesList.filter(func(msg) { msg.id != messageId });
+    chatMessages.add(streamId, filteredMessages);
+  };
+
+  func getChatMessageList(streamId : Nat) : List.List<LiveChatMessage> {
+    switch (chatMessages.get(streamId)) {
+      case (null) { List.empty<LiveChatMessage>() };
+      case (?list) { list };
+    };
+  };
+
+  // ------------ Live Gifts -------------
+
+  public type LiveGift = {
+    id : Nat;
+    streamId : Nat;
+    sender : Principal;
+    senderUsername : Text;
+    giftType : Text;
+    coinValue : Nat;
+    timestamp : Int;
+  };
+
+  let liveGifts = Map.empty<Nat, List.List<LiveGift>>();
+  var liveGiftCounter : Nat = 0;
+
+  public shared ({ caller }) func sendLiveGift(
+    streamId : Nat,
+    giftType : Text,
+    coinValue : Nat
+  ) : async Nat {
+    checkAuthenticatedUser(caller);
+
+    // Verify stream exists and monetization is enabled
+    let stream = getStreamOrTrap(streamId, caller);
+    if (not stream.monetizationEnabled) {
+      Runtime.trap("Monetization is disabled for this stream");
+    };
+
+    // Check privacy - only allowed viewers can send gifts
+    if (stream.privacy == "private" and stream.creatorId != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+      Runtime.trap("Unauthorized: Cannot send gifts to private stream");
+    };
+    if (stream.privacy == "subscribers_only" and stream.creatorId != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+      let subscriptions = getSubscriptionsSet(caller);
+      if (not subscriptions.contains(stream.creatorId)) {
+        Runtime.trap("Unauthorized: Must be subscribed to send gifts");
+      };
+    };
+
+    let username = switch (userProfiles.get(caller)) {
+      case (null) { "Guest" };
+      case (?profile) { profile.username };
+    };
+
+    // Deduct coins from sender's balance
+    spendCoinsInternal(caller, coinValue);
+
+    let newGift : LiveGift = {
+      id = liveGiftCounter;
+      streamId;
+      sender = caller;
+      senderUsername = username;
+      giftType;
+      coinValue;
+      timestamp = Time.now();
+    };
+
+    let giftsList = getLiveGiftList(streamId);
+    giftsList.add(newGift);
+    liveGifts.add(streamId, giftsList);
+
+    // Update stream totalGifts and totalRevenue
+    updateStreamRewards(streamId, coinValue);
+
+    let id = liveGiftCounter;
+    liveGiftCounter += 1;
+    id;
+  };
+
+  func updateStreamRewards(streamId : Nat, amount : Nat) {
+    switch (liveStreams.get(streamId)) {
+      case (?stream) {
+        let updatedStream = {
+          stream with
+          totalGifts = stream.totalGifts + amount;
+          totalRevenue = stream.totalRevenue + amount;
+        };
+        liveStreams.add(streamId, updatedStream);
+      };
+      case (null) { Runtime.trap("Live stream not found") };
+    };
+  };
+
+  public query ({ caller }) func getLiveGifts(streamId : Nat) : async [LiveGift] {
+    // Verify caller has access to view this stream's gifts
+    switch (liveStreams.get(streamId)) {
+      case (null) { Runtime.trap("Live stream not found") };
+      case (?stream) {
+        // Check privacy settings
+        if (stream.privacy == "private") {
+          if (stream.creatorId != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+            Runtime.trap("Unauthorized: Cannot view gifts of private stream");
+          };
+        } else if (stream.privacy == "subscribers_only") {
+          if (stream.creatorId != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+            let subscriptions = getSubscriptionsSet(caller);
+            if (not subscriptions.contains(stream.creatorId)) {
+              Runtime.trap("Unauthorized: Must be subscribed to view gifts");
+            };
+          };
+        };
+
+        getLiveGiftList(streamId).toArray();
+      };
+    };
+  };
+
+  public query ({ caller }) func getGiftLeaderboard(streamId : Nat) : async [LiveGift] {
+    // Verify caller has access to view this stream's leaderboard
+    switch (liveStreams.get(streamId)) {
+      case (null) { Runtime.trap("Live stream not found") };
+      case (?stream) {
+        // Check privacy settings
+        if (stream.privacy == "private") {
+          if (stream.creatorId != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+            Runtime.trap("Unauthorized: Cannot view leaderboard of private stream");
+          };
+        } else if (stream.privacy == "subscribers_only") {
+          if (stream.creatorId != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+            let subscriptions = getSubscriptionsSet(caller);
+            if (not subscriptions.contains(stream.creatorId)) {
+              Runtime.trap("Unauthorized: Must be subscribed to view leaderboard");
+            };
+          };
+        };
+
+        getLiveGiftList(streamId).toArray();
+      };
+    };
+  };
+
+  func getLiveGiftList(streamId : Nat) : List.List<LiveGift> {
+    switch (liveGifts.get(streamId)) {
+      case (null) { List.empty<LiveGift>() };
+      case (?list) { list };
+    };
+  };
+
+  // ------------ UserCoins System -------------
+
+  public type UserCoins = {
+    balance : Nat;
+  };
+
+  let userCoins = Map.empty<Principal, Nat>();
+
+  public query ({ caller }) func getCoinBalance() : async Nat {
+    checkAuthenticatedUser(caller);
+    getUserBalance(caller);
+  };
+
+  public shared ({ caller }) func addCoins(amount : Nat) : async () {
+    checkAuthenticatedUser(caller);
+    let currentBalance = getUserBalance(caller);
+    userCoins.add(caller, currentBalance + amount);
+  };
+
+  func spendCoinsInternal(user : Principal, amount : Nat) {
+    let currentBalance = getUserBalance(user);
+    if (currentBalance < amount) {
+      Runtime.trap("Insufficient coins");
+    };
+    userCoins.add(user, currentBalance - amount);
+  };
+
+  public shared ({ caller }) func spendCoins(streamId : Nat, amount : Nat) : async () {
+    checkAuthenticatedUser(caller);
+
+    // Verify stream exists
+    let stream = getStreamOrTrap(streamId, caller);
+
+    // Verify caller has access to this stream
+    if (stream.privacy == "private" and stream.creatorId != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+      Runtime.trap("Unauthorized: Cannot spend coins on private stream");
+    };
+    if (stream.privacy == "subscribers_only" and stream.creatorId != caller and not AccessControl.isAdmin(accessControlState, caller)) {
+      let subscriptions = getSubscriptionsSet(caller);
+      if (not subscriptions.contains(stream.creatorId)) {
+        Runtime.trap("Unauthorized: Must be subscribed to spend coins on this stream");
+      };
+    };
+
+    let currentBalance = getUserBalance(caller);
+    if (currentBalance < amount) {
+      Runtime.trap("Insufficient coins");
+    };
+    userCoins.add(caller, currentBalance - amount);
+    updateStreamRewards(streamId, amount);
+  };
+
+  func getUserBalance(user : Principal) : Nat {
+    switch (userCoins.get(user)) {
+      case (null) { 1000 }; // Default balance
+      case (?balance) { balance };
+    };
+  };
+
+  //-----------------------
+  // Helper Functions
+  //-----------------------
+
+  func getStreamOrTrap(id : Nat, _ : Principal) : LiveStream {
+    switch (liveStreams.get(id)) {
+      case (null) { Runtime.trap("Live stream not found") };
+      case (?stream) { stream };
     };
   };
 };
