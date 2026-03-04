@@ -20,6 +20,7 @@ import LiveVerticalSetupPage from "./pages/LiveVerticalSetupPage";
 import LiveWatchPage from "./pages/LiveWatchPage";
 import LoginPage from "./pages/LoginPage";
 import ProfilePage from "./pages/ProfilePage";
+import PublicCreatorProfilePage from "./pages/PublicCreatorProfilePage";
 import RechargePage from "./pages/RechargePage";
 import SetupProfilePage from "./pages/SetupProfilePage";
 import ShortsCreatePage from "./pages/ShortsCreatePage";
@@ -57,6 +58,9 @@ function AppInner() {
   const [liveSubRoute, setLiveSubRoute] = useState<LiveSubRoute>(null);
   const [shortsSubRoute, setShortsSubRoute] = useState<ShortsSubRoute>(null);
   const [walletSubRoute, setWalletSubRoute] = useState<WalletSubRoute>(null);
+  const [creatorProfileRoute, setCreatorProfileRoute] = useState<{
+    principalId: string;
+  } | null>(null);
   const { identity, isInitializing } = useInternetIdentity();
   const isAuthenticated = !!identity;
 
@@ -128,10 +132,12 @@ function AppInner() {
     setLiveSubRoute(null);
     setShortsSubRoute(null);
     setWalletSubRoute(null);
+    setCreatorProfileRoute(null);
   };
 
   // Whether we're in a full-screen sub-route (hide bottom nav)
   const isFullScreenRoute =
+    creatorProfileRoute !== null ||
     walletSubRoute !== null ||
     (activeTab === "live" &&
       liveSubRoute !== null &&
@@ -141,6 +147,17 @@ function AppInner() {
   // ─── Page renderer ────────────────────────────────────────────────────────
 
   const renderPage = () => {
+    // CREATOR PROFILE sub-route (full-screen, hide bottom nav)
+    if (creatorProfileRoute !== null) {
+      return (
+        <PublicCreatorProfilePage
+          key={`creator-${creatorProfileRoute.principalId}`}
+          principalId={creatorProfileRoute.principalId}
+          onBack={() => setCreatorProfileRoute(null)}
+        />
+      );
+    }
+
     // WALLET sub-routes (full-screen, hide bottom nav)
     if (walletSubRoute === "main") {
       return (
@@ -309,7 +326,14 @@ function AppInner() {
     // Default tab pages
     switch (activeTab) {
       case "home":
-        return <HomePage key="home" />;
+        return (
+          <HomePage
+            key="home"
+            onCreatorClick={(principalId) =>
+              setCreatorProfileRoute({ principalId })
+            }
+          />
+        );
       case "shorts":
         return (
           <ShortsPage
@@ -362,7 +386,7 @@ function AppInner() {
           >
             <AnimatePresence mode="wait">
               <motion.div
-                key={`${activeTab}-${liveSubRoute?.type ?? "null"}-${shortsSubRoute?.type ?? "null"}`}
+                key={`${activeTab}-${liveSubRoute?.type ?? "null"}-${shortsSubRoute?.type ?? "null"}-${creatorProfileRoute?.principalId ?? "null"}`}
                 initial={{
                   opacity: 0,
                   x: isShortsPage || isFullScreenRoute ? 0 : 8,

@@ -34,7 +34,11 @@ function filterVideosBySearch(videos: VideoPost[], query: string): VideoPost[] {
   );
 }
 
-export default function HomePage() {
+interface HomePageProps {
+  onCreatorClick?: (principalId: string) => void;
+}
+
+export default function HomePage({ onCreatorClick }: HomePageProps) {
   const { data: videos, isLoading } = useListVideoPosts();
   const [selectedVideo, setSelectedVideo] = useState<VideoPost | null>(null);
   const [activeCategory, setActiveCategory] = useState<Category>("All");
@@ -204,6 +208,9 @@ export default function HomePage() {
                       post={post}
                       index={index + 1}
                       onClick={() => setSelectedVideo(post)}
+                      onCreatorClick={(uploader) =>
+                        onCreatorClick?.(uploader.toString())
+                      }
                     />
                   ))}
                 </div>

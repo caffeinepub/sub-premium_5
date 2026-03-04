@@ -1,4 +1,5 @@
 import { Skeleton } from "@/components/ui/skeleton";
+import type { Principal } from "@icp-sdk/core/principal";
 import { Clock, Play } from "lucide-react";
 import { motion } from "motion/react";
 import { useState } from "react";
@@ -31,9 +32,15 @@ interface VideoCardProps {
   post: VideoPost;
   index: number;
   onClick: () => void;
+  onCreatorClick?: (uploader: Principal) => void;
 }
 
-export function VideoCard({ post, index, onClick }: VideoCardProps) {
+export function VideoCard({
+  post,
+  index,
+  onClick,
+  onCreatorClick,
+}: VideoCardProps) {
   const [imgError, setImgError] = useState(false);
   const { data: username } = useGetUsernameByPrincipal(post.uploader);
   const thumbnailUrl = post.thumbnailBlob.getDirectURL();
@@ -81,9 +88,17 @@ export function VideoCard({ post, index, onClick }: VideoCardProps) {
             {post.title}
           </h3>
           <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span className="font-medium truncate max-w-[60%]">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onCreatorClick?.(post.uploader);
+              }}
+              className="font-medium truncate max-w-[60%] text-primary hover:text-primary/80 transition-colors underline-offset-2 hover:underline text-left"
+              data-ocid="home.creator.button"
+            >
               @{username ?? "anonymous"}
-            </span>
+            </button>
             <span className="flex items-center gap-1 shrink-0">
               <Clock className="w-3 h-3" />
               {formatRelativeTime(post.timestamp)}
