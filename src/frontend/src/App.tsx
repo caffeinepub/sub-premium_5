@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { AIAssistant } from "./components/AIAssistant";
 import { BottomNav } from "./components/BottomNav";
 import type { TabId } from "./components/BottomNav";
+import { useActor } from "./hooks/useActor";
 import { useInternetIdentity } from "./hooks/useInternetIdentity";
 import { useGetCallerUserProfile } from "./hooks/useQueries";
 import { LanguageProvider } from "./i18n/LanguageContext";
@@ -64,6 +65,7 @@ function AppInner() {
   const [profileTimedOut, setProfileTimedOut] = useState(false);
   const [initTimedOut, setInitTimedOut] = useState(false);
   const { identity, isInitializing } = useInternetIdentity();
+  const { actor, isFetching: actorFetching } = useActor();
   const isAuthenticated = !!identity;
 
   // 8-second timeout: if auth init is still pending, show a Retry button
@@ -95,22 +97,34 @@ function AppInner() {
     return () => clearTimeout(t);
   }, [profileLoading]);
 
-  if (isInitializing) {
+  // Block on initializing only while within the 8-second window.
+  if (isInitializing && !initTimedOut) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="w-8 h-8 text-primary animate-spin" />
           <p className="text-sm text-muted-foreground">Restoring session…</p>
-          {initTimedOut && (
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              className="mt-1 px-4 py-1.5 rounded-full bg-primary text-white text-xs font-semibold hover:bg-primary/90 transition-colors"
-              data-ocid="app.init.retry_button"
-            >
-              Retry
-            </button>
-          )}
+        </div>
+      </div>
+    );
+  }
+
+  // After timeout — show retry option so users are never permanently stuck.
+  if (isInitializing && initTimedOut) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <p className="text-sm text-muted-foreground">
+            Taking longer than expected…
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="px-5 py-2 rounded-full bg-primary text-white text-sm font-semibold hover:bg-primary/90 transition-colors"
+            data-ocid="app.init.retry_button"
+          >
+            Retry
+          </button>
         </div>
       </div>
     );
@@ -136,10 +150,16 @@ function AppInner() {
     );
   }
 
+  // Show profile setup only when we have a definitive null (no profile exists).
+  // Guard against the brief window where actor is still initializing but profileFetched
+  // flips to true with null data — that would incorrectly redirect to SetupProfilePage.
+  // Only show setup once the actor is ready AND not still fetching.
   const showProfileSetup =
     isAuthenticated &&
+    !actorFetching &&
     !profileLoading &&
     profileFetched &&
+    !profileTimedOut &&
     userProfile === null;
 
   if (showProfileSetup) {
@@ -440,8 +460,11 @@ function AppInner() {
             <BottomNav activeTab={activeTab} onTabChange={navigateToTab} />
           )}
 
-          {/* Floating AI Assistant — hidden in full-screen sub-routes */}
-          {!isFullScreenRoute && <AIAssistant />}
+          {/* Floating AI Assistant — hidden in full-screen sub-routes, on profile tab,
+              and when the actor is not yet available (fail silently, no error shown) */}
+          {!isFullScreenRoute && activeTab !== "profile" && !!actor && (
+            <AIAssistant />
+          )}
         </div>
       </div>
 

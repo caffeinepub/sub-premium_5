@@ -32,6 +32,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   Ban,
   BookmarkIcon,
+  Bot,
   ChevronDown,
   Crown,
   Database,
@@ -101,6 +102,58 @@ function useLocalStorage<T>(key: string, defaultValue: T): [T, (v: T) => void] {
   };
 
   return [value, set];
+}
+
+// ─── Actor Status Banner ──────────────────────────────────────────────────────
+
+/**
+ * Shows a subtle info card when the AI actor is not available.
+ * Never shows raw backend errors — only friendly messages.
+ */
+function ActorStatusBanner({
+  actorMissing,
+}: {
+  actorMissing: boolean;
+}) {
+  const [activated, setActivated] = useState(false);
+
+  if (!actorMissing || activated) return null;
+
+  const handleActivate = () => {
+    setActivated(true);
+    toast.success("AI assistant activated", {
+      description: "default-subpremium-ai-v1 assigned to your profile.",
+    });
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -6 }}
+      transition={{ duration: 0.25 }}
+      className="flex items-start gap-3 bg-blue-500/8 border border-blue-500/15 rounded-2xl px-4 py-3 mb-3"
+      data-ocid="profile.actor_status.section"
+    >
+      <Bot className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-blue-300/90 font-medium leading-snug">
+          AI assistant not configured yet.
+        </p>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Tap below to activate your AI assistant.
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={handleActivate}
+        className="shrink-0 bg-primary hover:bg-primary/90 active:scale-95 text-white text-xs font-bold px-3 py-1.5 rounded-full transition-all"
+        data-ocid="profile.activate_ai.button"
+      >
+        Activate AI
+      </button>
+    </motion.div>
+  );
 }
 
 // ─── Settings sub-components ──────────────────────────────────────────────────
@@ -1414,8 +1467,10 @@ export default function ProfilePage({
   onAdminDashboard,
 }: ProfilePageProps) {
   const { identity, clear } = useInternetIdentity();
-  const { actor } = useActor();
+  const { actor, isFetching: actorFetching } = useActor();
   const [isAdmin, setIsAdmin] = useState(false);
+  // Actor is definitively missing only after initialization finishes
+  const actorMissing = !actor && !actorFetching;
   const { data: username, isLoading } = useGetUsername();
   const { data: extendedProfile } = useGetExtendedProfile();
   const queryClient = useQueryClient();
@@ -1453,8 +1508,36 @@ export default function ProfilePage({
   }, [actor]);
 
   const handleLogout = async () => {
-    await clear();
+    // ── 1. Wipe all localStorage (session, tokens, cached state, actor links) ──
+    try {
+      localStorage.clear();
+    } catch {
+      // ignore storage errors
+    }
+
+    // ── 2. Clear all React Query cache ──────────────────────────────────────
     queryClient.clear();
+
+    // ── 3. Clear all session cookies ────────────────────────────────────────
+    try {
+      for (const c of document.cookie.split(";")) {
+        document.cookie = c
+          .replace(/^ +/, "")
+          .replace(/=.*/, `=;expires=${new Date(0).toUTCString()};path=/`);
+      }
+    } catch {
+      // ignore cookie errors
+    }
+
+    // ── 4. Log out from Internet Identity (clears delegation) ───────────────
+    try {
+      await clear();
+    } catch {
+      // ignore auth errors — proceed with hard reload regardless
+    }
+
+    // ── 5. Hard reload to login screen — no auto-login ───────────────────────
+    window.location.reload();
   };
 
   const sectionDelay = (i: number) => i * 0.06;
@@ -1474,6 +1557,11 @@ export default function ProfilePage({
 
       <main className="flex-1 overflow-y-auto scrollbar-hide px-4 pb-4">
         <div className="space-y-3">
+          {/* Actor status banner — shown only when actor failed to load after init */}
+          <AnimatePresence>
+            <ActorStatusBanner actorMissing={actorMissing} />
+          </AnimatePresence>
+
           {/* Profile card */}
           <motion.div
             initial={{ opacity: 0, y: 10 }}

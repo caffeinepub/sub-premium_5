@@ -1,15 +1,42 @@
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Eye, EyeOff, Loader2, Play } from "lucide-react";
+import { Loader2, Play, Trash2 } from "lucide-react";
 import { motion } from "motion/react";
 import { useState } from "react";
+import { toast } from "sonner";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
+
+function clearAllSessions() {
+  try {
+    // Clear all localStorage
+    localStorage.clear();
+
+    // Clear all sessionStorage
+    sessionStorage.clear();
+
+    // Clear cookies (best-effort, cannot clear HttpOnly cookies)
+    for (const c of document.cookie.split(";")) {
+      const name = c.split("=")[0].trim();
+      document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
+    }
+  } catch {
+    // Ignore errors
+  }
+}
 
 export default function LoginPage() {
   const { login, isLoggingIn, isLoginError, loginError } =
     useInternetIdentity();
-  const [showPassword, setShowPassword] = useState(false);
+  const [clearing, setClearing] = useState(false);
+
+  const handleClearSession = async () => {
+    setClearing(true);
+    clearAllSessions();
+    toast.success("Session cleared. You can now sign in fresh.");
+    // Short delay then hard reload to ensure a completely clean state
+    setTimeout(() => {
+      window.location.reload();
+    }, 1200);
+  };
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 relative overflow-hidden">
@@ -54,45 +81,12 @@ export default function LoginPage() {
             Sign in to access your content
           </p>
 
-          {/* Demo email/password fields — visual only, actual auth via Internet Identity */}
-          <div className="space-y-4 mb-6">
-            <div className="space-y-1.5">
-              <Label htmlFor="email" className="text-sm font-medium">
-                Email
-              </Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="you@example.com"
-                className="bg-secondary border-border/50 rounded-xl h-12 focus-visible:ring-primary"
-                data-ocid="login.input"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="password" className="text-sm font-medium">
-                Password
-              </Label>
-              <div className="relative">
-                <Input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  placeholder="••••••••"
-                  className="bg-secondary border-border/50 rounded-xl h-12 pr-12 focus-visible:ring-primary"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((p) => !p)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1"
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                >
-                  {showPassword ? (
-                    <EyeOff className="w-4 h-4" />
-                  ) : (
-                    <Eye className="w-4 h-4" />
-                  )}
-                </button>
-              </div>
-            </div>
+          {/* Sign-in explanation — no password needed, auth via Internet Identity */}
+          <div className="mb-6 text-center">
+            <p className="text-sm text-muted-foreground">
+              Tap the button below to sign in securely using Internet Identity —
+              no password needed.
+            </p>
           </div>
 
           {isLoginError && (
@@ -106,7 +100,7 @@ export default function LoginPage() {
 
           <Button
             onClick={login}
-            disabled={isLoggingIn}
+            disabled={isLoggingIn || clearing}
             className="w-full h-12 rounded-xl bg-primary hover:bg-primary/90 text-white font-bold text-base glow-primary transition-all"
             data-ocid="login.submit_button"
           >
@@ -125,8 +119,41 @@ export default function LoginPage() {
           </p>
         </motion.div>
 
+        {/* Clear Session section */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.5, delay: 0.25 }}
+          className="mt-4"
+        >
+          <div className="bg-card/50 rounded-2xl p-4 border border-border/30">
+            <p className="text-xs text-muted-foreground text-center mb-3">
+              Having trouble signing in? Clear your session to start fresh.
+            </p>
+            <Button
+              variant="outline"
+              onClick={handleClearSession}
+              disabled={clearing || isLoggingIn}
+              className="w-full h-10 rounded-xl border-border/50 text-muted-foreground hover:text-foreground hover:border-border text-sm font-medium transition-all"
+              data-ocid="login.clear_session_button"
+            >
+              {clearing ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />
+                  Clearing…
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-3.5 h-3.5 mr-2" />
+                  Clear Session
+                </>
+              )}
+            </Button>
+          </div>
+        </motion.div>
+
         {/* Footer */}
-        <p className="text-center text-xs text-muted-foreground mt-8 opacity-50">
+        <p className="text-center text-xs text-muted-foreground mt-6 opacity-50">
           © {new Date().getFullYear()}.{" "}
           <span>Built with love using caffeine.ai</span>
         </p>

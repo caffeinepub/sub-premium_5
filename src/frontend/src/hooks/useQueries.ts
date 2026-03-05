@@ -15,11 +15,12 @@ export function useGetCallerUserProfile() {
   const query = useQuery({
     queryKey: ["currentUserProfile"],
     queryFn: async () => {
-      if (!actor) throw new Error("Actor not available");
+      // Return null gracefully when actor isn't ready — avoids error state
+      if (!actor) return null;
       return actor.getCallerUserProfile();
     },
     enabled: !!actor && !actorFetching,
-    retry: false,
+    retry: 2,
   });
 
   return {
@@ -35,10 +36,12 @@ export function useGetUsername() {
   return useQuery({
     queryKey: ["username"],
     queryFn: async () => {
-      if (!actor) throw new Error("Actor not available");
+      // Return null gracefully when actor isn't ready — never throws to UI
+      if (!actor) return null;
       return actor.getUsername();
     },
     enabled: !!actor && !actorFetching,
+    retry: 0,
   });
 }
 
