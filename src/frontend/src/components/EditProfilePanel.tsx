@@ -269,8 +269,12 @@ export function EditProfilePanel({ open, onClose }: Props) {
       maskedCardNumber = `**** **** **** ${cardNumber.slice(-4)}`;
     }
 
+    // If name field is empty, fall back to username so validation never fires
+    // an empty-name error on the backend side
+    const resolvedName = name.trim() || username.trim();
+
     const profile = {
-      name: name.trim(),
+      name: resolvedName,
       username: username.trim(),
       bio: bio.trim(),
       avatarUrl: avatarUrl || undefined,
@@ -283,8 +287,9 @@ export function EditProfilePanel({ open, onClose }: Props) {
       await saveExtendedProfile.mutateAsync(profile);
       toast.success("Profile updated successfully");
       onClose();
-    } catch {
-      toast.error("Failed to save profile. Please try again.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to save profile";
+      toast.error(msg);
     }
   };
 

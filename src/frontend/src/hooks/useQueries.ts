@@ -502,6 +502,10 @@ export function useSaveExtendedProfile() {
     mutationFn: async (profile: import("../backend.d").ExtendedProfile) => {
       if (!actor) throw new Error("Actor not available");
       await actor.saveExtendedProfile(profile);
+      // Keep the username map in sync so getUsername() reflects the new value
+      if (profile.username) {
+        await actor.setUsername(profile.username);
+      }
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["extendedProfile"] });
