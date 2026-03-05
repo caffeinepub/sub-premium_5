@@ -290,6 +290,7 @@ export default function HomePage({ onCreatorClick }: HomePageProps) {
         post={selectedVideo}
         open={!!selectedVideo}
         onClose={() => setSelectedVideo(null)}
+        onOpenNext={(nextPost) => setSelectedVideo(nextPost)}
       />
     </div>
   );

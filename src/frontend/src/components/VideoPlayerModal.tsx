@@ -1448,12 +1448,14 @@ interface VideoPlayerModalProps {
   post: VideoPost | null;
   open: boolean;
   onClose: () => void;
+  onOpenNext?: (post: VideoPost) => void;
 }
 
 export function VideoPlayerModal({
   post,
   open,
   onClose,
+  onOpenNext,
 }: VideoPlayerModalProps) {
   const { data: creatorUsername } = useGetUsernameByPrincipal(post?.uploader);
   const { data: currentUsername } = useGetUsername();
@@ -1484,11 +1486,15 @@ export function VideoPlayerModal({
   // PiP state
   const [pipActive, setPipActive] = useState(false);
 
-  // Up Next preview card (last 5s + after video ends)
+  // Up Next preview card (last 3s + after video ends)
   const [showUpNext, setShowUpNext] = useState(false);
-  const [upNextCountdown, setUpNextCountdown] = useState(5);
+  const [upNextCountdown, setUpNextCountdown] = useState(3);
   const [upNextCancelled, setUpNextCancelled] = useState(false);
   const upNextTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // callback ref so handlePlayNext can be called from the Up Next card
+  const onOpenNextRef = useRef(onOpenNext);
+  onOpenNextRef.current = onOpenNext;
+  const openVideoRef = useRef<((v: VideoPost) => void) | null>(null);
 
   // Actions
   const [playlistOpen, setPlaylistOpen] = useState(false);
@@ -1506,6 +1512,12 @@ export function VideoPlayerModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [identity],
   );
+
+  // True when the logged-in user is the creator of this video — hide Subscribe
+  const isOwnVideo = useMemo(() => {
+    if (!identity || !post) return false;
+    return identity.getPrincipal().toString() === post.uploader.toString();
+  }, [identity, post]);
 
   // Engagement data — fetched in background, never blocks render
   const { data: engagementData } = useVideoEngagement(
@@ -1532,6 +1544,15 @@ export function VideoPlayerModal({
         : [],
     [allVideos, post],
   );
+
+  // Wire openVideoRef to call onOpenNext (close current + open next)
+  useEffect(() => {
+    openVideoRef.current = (nextVideo: VideoPost) => {
+      if (onOpenNextRef.current) {
+        onOpenNextRef.current(nextVideo);
+      }
+    };
+  }, []);
 
   // Creator online status
   const creatorLastActive = useMemo(() => {
@@ -1580,7 +1601,7 @@ export function VideoPlayerModal({
     setNewComment("");
     setDescExpanded(false);
     setShowUpNext(false);
-    setUpNextCountdown(5);
+    setUpNextCountdown(3);
     setUpNextCancelled(false);
     setPipActive(false);
     dragY.set(0);
@@ -1648,15 +1669,18 @@ export function VideoPlayerModal({
   // biome-ignore lint/correctness/useExhaustiveDependencies: upNextCancelled is checked inside but we intentionally only re-run when showUpNext toggles
   useEffect(() => {
     if (!showUpNext || upNextCancelled) return;
-    // Reset countdown
-    setUpNextCountdown(5);
+    // Reset countdown to 3
+    setUpNextCountdown(3);
     if (upNextTimerRef.current) clearInterval(upNextTimerRef.current);
     upNextTimerRef.current = setInterval(() => {
       setUpNextCountdown((prev) => {
         if (prev <= 1) {
           if (upNextTimerRef.current) clearInterval(upNextTimerRef.current);
-          // Auto-dismiss the card when countdown hits 0
+          // Auto-switch to next video when countdown hits 0
           setShowUpNext(false);
+          if (openVideoRef.current && suggested[0]) {
+            openVideoRef.current(suggested[0]);
+          }
           return 0;
         }
         return prev - 1;
@@ -1665,7 +1689,7 @@ export function VideoPlayerModal({
     return () => {
       if (upNextTimerRef.current) clearInterval(upNextTimerRef.current);
     };
-  }, [showUpNext]);
+  }, [showUpNext, suggested]);
 
   // ── subtitle auto-detect ──────────────────────────────────────────────────
   useEffect(() => {
@@ -1813,8 +1837,10 @@ export function VideoPlayerModal({
   const handleTimeUpdate = () => {
     const v = videoRef.current;
     if (!v || v.duration === 0) return;
+    // Only show Up Next if there's actually a next video to switch to
+    if (suggested.length === 0) return;
     const remaining = v.duration - v.currentTime;
-    if (remaining <= 5 && !upNextCancelled) {
+    if (remaining <= 3 && !upNextCancelled && !showUpNext) {
       setShowUpNext(true);
     }
   };
@@ -1853,6 +1879,10 @@ export function VideoPlayerModal({
   // ── subscribe ─────────────────────────────────────────────────────────────
   const handleSubscribe = async () => {
     if (!post) return;
+    if (isOwnVideo) {
+      toast.error("You cannot subscribe to your own account.");
+      return;
+    }
     try {
       if (isFollowing) {
         await unfollowCreator.mutateAsync(post.uploader);
@@ -1998,46 +2028,77 @@ export function VideoPlayerModal({
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: 16 }}
                       transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-                      className="absolute bottom-12 left-3 right-12 z-20 pointer-events-auto"
+                      className="absolute bottom-14 left-3 right-3 z-20 pointer-events-auto"
                       data-ocid="player.up_next.panel"
                     >
-                      <div className="flex items-center gap-2.5 bg-black/80 backdrop-blur-sm border border-white/10 rounded-2xl px-3 py-2.5">
-                        {/* Thumbnail */}
-                        <div className="w-14 h-9 rounded-lg overflow-hidden bg-white/10 shrink-0">
-                          <img
-                            src={suggested[0].thumbnailBlob.getDirectURL()}
-                            alt={suggested[0].title}
-                            className="w-full h-full object-cover"
-                            onError={(e) => {
-                              (
-                                e.currentTarget as HTMLImageElement
-                              ).style.display = "none";
+                      <div className="bg-black/85 backdrop-blur-sm border border-white/10 rounded-2xl px-3 py-2.5 space-y-2">
+                        {/* Top row: thumbnail + title + countdown */}
+                        <div className="flex items-center gap-2.5">
+                          {/* Thumbnail */}
+                          <div className="w-14 h-9 rounded-lg overflow-hidden bg-white/10 shrink-0">
+                            <img
+                              src={suggested[0].thumbnailBlob.getDirectURL()}
+                              alt={suggested[0].title}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                (
+                                  e.currentTarget as HTMLImageElement
+                                ).style.display = "none";
+                              }}
+                            />
+                          </div>
+                          {/* Text + countdown */}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white/50 text-[10px] font-semibold uppercase tracking-wider leading-none mb-0.5">
+                              Up Next · {upNextCountdown}s
+                            </p>
+                            <p className="text-white text-xs font-semibold line-clamp-1">
+                              {suggested[0].title}
+                            </p>
+                          </div>
+                        </div>
+                        {/* Countdown progress bar */}
+                        <div className="w-full h-0.5 rounded-full bg-white/20 overflow-hidden">
+                          <motion.div
+                            className="h-full bg-[#FF2D2D] rounded-full"
+                            initial={{ width: "100%" }}
+                            animate={{
+                              width: `${(upNextCountdown / 3) * 100}%`,
                             }}
+                            transition={{ duration: 0.9, ease: "linear" }}
                           />
                         </div>
-                        {/* Text */}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-white/50 text-[10px] font-semibold uppercase tracking-wider leading-none mb-0.5">
-                            Up Next · {upNextCountdown}s
-                          </p>
-                          <p className="text-white text-xs font-semibold line-clamp-1">
-                            {suggested[0].title}
-                          </p>
+                        {/* Action row */}
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (upNextTimerRef.current)
+                                clearInterval(upNextTimerRef.current);
+                              setShowUpNext(false);
+                              if (openVideoRef.current && suggested[0]) {
+                                openVideoRef.current(suggested[0]);
+                              }
+                            }}
+                            className="flex-1 h-8 rounded-full bg-[#FF2D2D] hover:bg-[#FF2D2D]/90 text-white text-xs font-bold transition-colors active:scale-95"
+                            data-ocid="player.up_next.watch_now_button"
+                          >
+                            Watch Now
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setUpNextCancelled(true);
+                              setShowUpNext(false);
+                              if (upNextTimerRef.current)
+                                clearInterval(upNextTimerRef.current);
+                            }}
+                            className="shrink-0 h-8 px-3 rounded-full bg-white/15 hover:bg-white/25 text-white/80 text-xs font-semibold transition-colors"
+                            data-ocid="player.up_next.cancel_button"
+                          >
+                            Cancel
+                          </button>
                         </div>
-                        {/* Cancel */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setUpNextCancelled(true);
-                            setShowUpNext(false);
-                            if (upNextTimerRef.current)
-                              clearInterval(upNextTimerRef.current);
-                          }}
-                          className="shrink-0 h-7 px-2.5 rounded-full bg-white/15 hover:bg-white/25 text-white/80 text-xs font-semibold transition-colors"
-                          data-ocid="player.up_next.cancel_button"
-                        >
-                          Cancel
-                        </button>
                       </div>
                     </motion.div>
                   )}
@@ -2170,14 +2231,24 @@ export function VideoPlayerModal({
                   </div>
                   <p className="text-xs text-muted-foreground">Creator</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void handleSubscribe()}
-                  className={`shrink-0 px-4 py-1.5 rounded-full text-sm font-bold transition-colors ${isFollowing ? "bg-secondary text-foreground hover:bg-secondary/80" : "bg-[#FF2D2D] hover:bg-[#FF2D2D]/90 text-white"}`}
-                  data-ocid="player.subscribe.button"
-                >
-                  {isFollowing ? "Subscribed" : "Subscribe"}
-                </button>
+                {isOwnVideo ? (
+                  <span
+                    className="shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold text-muted-foreground bg-secondary/60 cursor-default"
+                    title="You cannot subscribe to your own account"
+                    data-ocid="player.subscribe.own_label"
+                  >
+                    Your video
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void handleSubscribe()}
+                    className={`shrink-0 px-4 py-1.5 rounded-full text-sm font-bold transition-colors ${isFollowing ? "bg-secondary text-foreground hover:bg-secondary/80" : "bg-[#FF2D2D] hover:bg-[#FF2D2D]/90 text-white"}`}
+                    data-ocid="player.subscribe.button"
+                  >
+                    {isFollowing ? "Subscribed" : "Subscribe"}
+                  </button>
+                )}
               </div>
 
               <div className="h-px bg-border/15 mx-4" />
