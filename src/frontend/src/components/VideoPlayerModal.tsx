@@ -233,16 +233,51 @@ function bumpCmtAi(id: string) {
     /**/
   }
 }
-function getVLikes(vid: string) {
+function getGuestId(): string {
   try {
-    return Number(localStorage.getItem(`vl-${vid}`) ?? 0);
+    let id = localStorage.getItem("guestId");
+    if (!id) {
+      id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      localStorage.setItem("guestId", id);
+    }
+    return id;
+  } catch {
+    return "guest";
+  }
+}
+function getVideoViews(vid: string): number {
+  try {
+    return Number(localStorage.getItem(`vviews-${vid}`) ?? 0);
   } catch {
     return 0;
   }
 }
-function getUserLiked(vid: string) {
+function incrementVideoViews(vid: string, userId: string): number {
   try {
-    return localStorage.getItem(`ul-${vid}`) === "1";
+    const tsKey = `vview-ts-${vid}-${userId}`;
+    const last = Number(localStorage.getItem(tsKey) ?? 0);
+    const now = Date.now();
+    if (now - last > 24 * 60 * 60 * 1000) {
+      const newCount = getVideoViews(vid) + 1;
+      localStorage.setItem(`vviews-${vid}`, String(newCount));
+      localStorage.setItem(tsKey, String(now));
+      return newCount;
+    }
+    return getVideoViews(vid);
+  } catch {
+    return 0;
+  }
+}
+function getVideoLikes(vid: string): number {
+  try {
+    return Number(localStorage.getItem(`vlikes-${vid}`) ?? 0);
+  } catch {
+    return 0;
+  }
+}
+function getUserLikedVideo(vid: string, userId: string): boolean {
+  try {
+    return localStorage.getItem(`vliked-${vid}-${userId}`) === "1";
   } catch {
     return false;
   }
@@ -252,17 +287,6 @@ function getUserDisliked(vid: string) {
     return localStorage.getItem(`ud-${vid}`) === "1";
   } catch {
     return false;
-  }
-}
-function getViews(vid: string) {
-  try {
-    const r = localStorage.getItem(`vv-${vid}`);
-    if (r) return Number(r);
-    const b = Math.floor(Math.random() * 50000) + 800;
-    localStorage.setItem(`vv-${vid}`, b.toString());
-    return b;
-  } catch {
-    return 1024;
   }
 }
 
@@ -1273,7 +1297,7 @@ function SuggestedCard({
   onClick,
 }: { post: VideoPost; onClick: () => void }) {
   const { data: creator } = useGetUsernameByPrincipal(post.uploader);
-  const views = useMemo(() => getViews(post.id.toString()), [post.id]);
+  const views = useMemo(() => getVideoViews(post.id.toString()), [post.id]);
   return (
     <button
       type="button"
@@ -1446,11 +1470,16 @@ export function VideoPlayerModal({
   const videoIdStr = post?.id.toString() ?? "";
   const creatorName = creatorUsername ?? "unknown";
   const currentUser = currentUsername ?? "Anonymous";
-  const views = useMemo(
-    () => (post ? getViews(post.id.toString()) : 0),
-    [post],
+
+  // Stable userId (principal or guestId fallback)
+  const userId = useMemo(
+    () => identity?.getPrincipal().toString() ?? getGuestId(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [identity],
   );
 
+  // Views / Like state
+  const [views, setViews] = useState(0);
   // Like/dislike
   const [liked, setLiked] = useState(false);
   const [disliked, setDisliked] = useState(false);
@@ -1493,17 +1522,21 @@ export function VideoPlayerModal({
   useEffect(() => {
     if (!open || !post) return;
     const vid = post.id.toString();
-    setLiked(getUserLiked(vid));
+    const uid = identityRef.current?.getPrincipal().toString() ?? getGuestId();
+    // Increment view count with 24h dedup, then read canonical count
+    const newViews = incrementVideoViews(vid, uid);
+    setViews(newViews);
+    // Likes
+    setLikeCount(getVideoLikes(vid));
+    setLiked(getUserLikedVideo(vid, uid));
     setDisliked(getUserDisliked(vid));
-    setLikeCount(getVLikes(vid));
     setComments(loadComments(vid));
     setNewComment("");
     setDescExpanded(false);
     setShowEndScreen(false);
     setPipActive(false);
     mutateRef.current(post.id);
-    const pid = identityRef.current?.getPrincipal().toString();
-    if (pid) updateActiveStatus(pid);
+    if (uid && uid !== "guest") updateActiveStatus(uid);
   }, [open, post]);
 
   // ── subtitle auto-detect ──────────────────────────────────────────────────
@@ -1516,6 +1549,17 @@ export function VideoPlayerModal({
     if (sl !== "off") void changeSubtitle(sl);
     // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally only on lang/open
   }, [open, lang]);
+
+  // ── 10-second polling for like count sync ────────────────────────────────
+  useEffect(() => {
+    if (!open || !post) return;
+    const vid = post.id.toString();
+    const interval = setInterval(() => {
+      const latest = getVideoLikes(vid);
+      setLikeCount(latest);
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [open, post]);
 
   // ── playback speed ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1606,28 +1650,26 @@ export function VideoPlayerModal({
   const handleLike = () => {
     const vid = post?.id.toString() ?? "";
     if (!liked) {
-      setLiked(true);
-      setLikeCount((c) => c + 1);
+      const newCount = getVideoLikes(vid) + 1;
+      try {
+        localStorage.setItem(`vlikes-${vid}`, String(newCount));
+        localStorage.setItem(`vliked-${vid}-${userId}`, "1");
+      } catch {
+        /**/
+      }
       if (disliked) setDisliked(false);
-      try {
-        localStorage.setItem(`ul-${vid}`, "1");
-        localStorage.setItem(`vl-${vid}`, (likeCount + 1).toString());
-        localStorage.removeItem(`ud-${vid}`);
-      } catch {
-        /**/
-      }
+      setLiked(true);
+      setLikeCount(newCount);
     } else {
-      setLiked(false);
-      setLikeCount((c) => Math.max(0, c - 1));
+      const newCount = Math.max(0, getVideoLikes(vid) - 1);
       try {
-        localStorage.removeItem(`ul-${vid}`);
-        localStorage.setItem(
-          `vl-${vid}`,
-          Math.max(0, likeCount - 1).toString(),
-        );
+        localStorage.setItem(`vlikes-${vid}`, String(newCount));
+        localStorage.removeItem(`vliked-${vid}-${userId}`);
       } catch {
         /**/
       }
+      setLiked(false);
+      setLikeCount(newCount);
     }
   };
   const handleDislike = () => {
@@ -1635,12 +1677,19 @@ export function VideoPlayerModal({
     if (!disliked) {
       setDisliked(true);
       if (liked) {
+        // Un-like when disliking
+        const newCount = Math.max(0, getVideoLikes(vid) - 1);
+        try {
+          localStorage.setItem(`vlikes-${vid}`, String(newCount));
+          localStorage.removeItem(`vliked-${vid}-${userId}`);
+        } catch {
+          /**/
+        }
         setLiked(false);
-        setLikeCount((c) => Math.max(0, c - 1));
+        setLikeCount(newCount);
       }
       try {
         localStorage.setItem(`ud-${vid}`, "1");
-        localStorage.removeItem(`ul-${vid}`);
       } catch {
         /**/
       }
