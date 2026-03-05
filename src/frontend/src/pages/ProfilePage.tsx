@@ -1664,14 +1664,7 @@ export default function ProfilePage({
           {/* Footer */}
           <p className="text-center text-xs text-muted-foreground opacity-40 pt-2">
             © {new Date().getFullYear()}.{" "}
-            <a
-              href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(window.location.hostname)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:opacity-70 transition-opacity"
-            >
-              Built with love using caffeine.ai
-            </a>
+            <span>Built with love using caffeine.ai</span>
           </p>
         </div>
       </main>

@@ -1,4 +1,4 @@
-import { Bell, Tv2, User } from "lucide-react";
+import { Bell, SlidersHorizontal, Tv2, User } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useMemo, useState } from "react";
 import type { VideoPost } from "../backend.d";
@@ -13,6 +13,7 @@ import type { Notification } from "../components/NotificationsPanel";
 import { VideoCard, VideoCardSkeleton } from "../components/VideoCard";
 import { VideoPlayerModal } from "../components/VideoPlayerModal";
 import { useListVideoPosts } from "../hooks/useQueries";
+import { getEngagement } from "../utils/videoEngagement";
 
 function filterVideos(videos: VideoPost[], category: Category): VideoPost[] {
   if (category === "All") return videos;
@@ -34,6 +35,18 @@ function filterVideosBySearch(videos: VideoPost[], query: string): VideoPost[] {
   );
 }
 
+type SortMode = "latest" | "most_viewed";
+
+function sortVideos(videos: VideoPost[], mode: SortMode): VideoPost[] {
+  if (mode === "latest")
+    return [...videos].sort((a, b) => Number(b.timestamp - a.timestamp));
+  return [...videos].sort(
+    (a, b) =>
+      (getEngagement(b.id.toString()).views ?? 0) -
+      (getEngagement(a.id.toString()).views ?? 0),
+  );
+}
+
 interface HomePageProps {
   onCreatorClick?: (principalId: string) => void;
 }
@@ -48,6 +61,8 @@ export default function HomePage({ onCreatorClick }: HomePageProps) {
   const [notifications, setNotifications] = useState<Notification[]>(
     DEFAULT_NOTIFICATIONS,
   );
+  const [sortMode, setSortMode] = useState<SortMode>("latest");
+  const [showSortMenu, setShowSortMenu] = useState(false);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
@@ -57,11 +72,12 @@ export default function HomePage({ onCreatorClick }: HomePageProps) {
   );
 
   const displayedVideos = useMemo(() => {
-    if (searchActive && searchQuery.trim()) {
-      return filterVideosBySearch(videos ?? [], searchQuery);
-    }
-    return categoryFilteredVideos;
-  }, [searchActive, searchQuery, videos, categoryFilteredVideos]);
+    const base =
+      searchActive && searchQuery.trim()
+        ? filterVideosBySearch(videos ?? [], searchQuery)
+        : categoryFilteredVideos;
+    return sortVideos(base, sortMode);
+  }, [searchActive, searchQuery, videos, categoryFilteredVideos, sortMode]);
 
   function handleSearch(q: string) {
     setSearchQuery(q);
@@ -137,8 +153,57 @@ export default function HomePage({ onCreatorClick }: HomePageProps) {
           onVideoClick={(v) => setSelectedVideo(v)}
         />
 
-        {/* Category tabs */}
-        <CategoryTabs active={activeCategory} onChange={setActiveCategory} />
+        {/* Category tabs + sort */}
+        <div className="flex items-center gap-2 pr-4">
+          <div className="flex-1">
+            <CategoryTabs
+              active={activeCategory}
+              onChange={setActiveCategory}
+            />
+          </div>
+          {/* Sort button */}
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowSortMenu((p) => !p)}
+              className="flex items-center gap-1.5 h-8 px-3 rounded-full bg-[#1C1C1C] text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
+              data-ocid="home.sort.button"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              {sortMode === "latest" ? "Latest" : "Most Viewed"}
+            </button>
+            <AnimatePresence>
+              {showSortMenu && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.92, y: -4 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.92, y: -4 }}
+                  transition={{ duration: 0.15 }}
+                  className="absolute right-0 top-10 z-20 bg-card border border-border/40 rounded-2xl shadow-xl overflow-hidden w-40"
+                  data-ocid="home.sort.dropdown_menu"
+                >
+                  {(["latest", "most_viewed"] as SortMode[]).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => {
+                        setSortMode(mode);
+                        setShowSortMenu(false);
+                      }}
+                      className={`w-full flex items-center gap-2 px-4 py-3 text-xs font-semibold transition-colors ${sortMode === mode ? "text-primary bg-primary/10" : "text-foreground hover:bg-secondary/40"}`}
+                      data-ocid={`home.sort.${mode}.button`}
+                    >
+                      {mode === "latest" ? "Latest" : "Most Viewed"}
+                      {sortMode === mode && (
+                        <span className="ml-auto text-primary">✓</span>
+                      )}
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
 
         {/* Thin separator */}
         <div className="h-px bg-border/20 mx-4" />

@@ -128,14 +128,7 @@ export default function LoginPage() {
         {/* Footer */}
         <p className="text-center text-xs text-muted-foreground mt-8 opacity-50">
           © {new Date().getFullYear()}.{" "}
-          <a
-            href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(window.location.hostname)}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-foreground transition-colors"
-          >
-            Built with love using caffeine.ai
-          </a>
+          <span>Built with love using caffeine.ai</span>
         </p>
       </div>
     </div>

@@ -1,5 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ExternalBlob } from "../backend";
+import {
+  fetchEngagement,
+  recordView,
+  toggleLike,
+} from "../utils/videoEngagement";
 import { useActor } from "./useActor";
 
 // ─── User Profile ────────────────────────────────────────────────────────────
@@ -513,6 +518,105 @@ export function useCheckUsernameAvailable() {
     mutationFn: async (username: string) => {
       if (!actor) throw new Error("Actor not available");
       return actor.checkUsernameAvailable(username);
+    },
+  });
+}
+
+// ─── Video Engagement ─────────────────────────────────────────────────────────
+
+/**
+ * Fetches engagement data (views, likes, userLiked) for a video.
+ * Starts with defaults, fetches in background with a 5-second timeout.
+ * Never blocks rendering — returns { views: 0, likes: 0, userLiked: false }
+ * on any error or timeout.
+ */
+export function useVideoEngagement(
+  videoId: string | undefined,
+  userId: string | undefined,
+) {
+  return useQuery({
+    queryKey: ["videoEngagement", videoId, userId],
+    queryFn: async () => {
+      if (!videoId || !userId) return { views: 0, likes: 0, userLiked: false };
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5000);
+      try {
+        const result = await fetchEngagement(
+          videoId,
+          userId,
+          controller.signal,
+        );
+        return result;
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    enabled: !!videoId,
+    staleTime: 0,
+    gcTime: 30_000,
+    retry: false,
+  });
+}
+
+/**
+ * Mutation that records a view for a video (deduped per 24h per user).
+ * Fires non-blocking after the video page opens.
+ */
+export function useRecordVideoView() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      videoId,
+      userId,
+    }: {
+      videoId: string;
+      userId: string;
+    }) => {
+      return recordView(videoId, userId);
+    },
+    onSuccess: (newViews, { videoId, userId }) => {
+      queryClient.setQueryData(
+        ["videoEngagement", videoId, userId],
+        (
+          old: { views: number; likes: number; userLiked: boolean } | undefined,
+        ) =>
+          old
+            ? { ...old, views: newViews }
+            : { views: newViews, likes: 0, userLiked: false },
+      );
+    },
+  });
+}
+
+/**
+ * Mutation that toggles the like status for a video.
+ * Optimistically updates the React Query cache so the UI reflects the new
+ * state immediately without re-fetching.
+ */
+export function useToggleVideoLike() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      videoId,
+      userId,
+    }: {
+      videoId: string;
+      userId: string;
+    }) => {
+      return toggleLike(videoId, userId);
+    },
+    onSuccess: (result, { videoId, userId }) => {
+      queryClient.setQueryData(
+        ["videoEngagement", videoId, userId],
+        (
+          old: { views: number; likes: number; userLiked: boolean } | undefined,
+        ) =>
+          old
+            ? { ...old, likes: result.likeCount, userLiked: result.liked }
+            : { views: 0, likes: result.likeCount, userLiked: result.liked },
+      );
     },
   });
 }

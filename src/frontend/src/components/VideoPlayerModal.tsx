@@ -82,8 +82,11 @@ import {
   useIsFollowing,
   useListMyPlaylists,
   useListVideoPosts,
+  useRecordVideoView,
   useRecordWatchHistory,
+  useToggleVideoLike,
   useUnfollowCreator,
+  useVideoEngagement,
 } from "../hooks/useQueries";
 import { useLanguage } from "../i18n/LanguageContext";
 import { LANGUAGES } from "../i18n/languages";
@@ -243,43 +246,6 @@ function getGuestId(): string {
     return id;
   } catch {
     return "guest";
-  }
-}
-function getVideoViews(vid: string): number {
-  try {
-    return Number(localStorage.getItem(`vviews-${vid}`) ?? 0);
-  } catch {
-    return 0;
-  }
-}
-function incrementVideoViews(vid: string, userId: string): number {
-  try {
-    const tsKey = `vview-ts-${vid}-${userId}`;
-    const last = Number(localStorage.getItem(tsKey) ?? 0);
-    const now = Date.now();
-    if (now - last > 24 * 60 * 60 * 1000) {
-      const newCount = getVideoViews(vid) + 1;
-      localStorage.setItem(`vviews-${vid}`, String(newCount));
-      localStorage.setItem(tsKey, String(now));
-      return newCount;
-    }
-    return getVideoViews(vid);
-  } catch {
-    return 0;
-  }
-}
-function getVideoLikes(vid: string): number {
-  try {
-    return Number(localStorage.getItem(`vlikes-${vid}`) ?? 0);
-  } catch {
-    return 0;
-  }
-}
-function getUserLikedVideo(vid: string, userId: string): boolean {
-  try {
-    return localStorage.getItem(`vliked-${vid}-${userId}`) === "1";
-  } catch {
-    return false;
   }
 }
 function getUserDisliked(vid: string) {
@@ -1297,7 +1263,8 @@ function SuggestedCard({
   onClick,
 }: { post: VideoPost; onClick: () => void }) {
   const { data: creator } = useGetUsernameByPrincipal(post.uploader);
-  const views = useMemo(() => getVideoViews(post.id.toString()), [post.id]);
+  const { data: eng } = useVideoEngagement(post.id.toString(), undefined);
+  const views = eng?.views ?? 0;
   return (
     <button
       type="button"
@@ -1373,7 +1340,6 @@ function PipPlayer({
           autoPlay
           playsInline
           muted={videoRef.current?.muted ?? false}
-          // biome-ignore lint/a11y/useMediaCaption: pip mirror; captions on main player
         />
         {/* Expand tap target */}
         <button
@@ -1438,6 +1404,8 @@ export function VideoPlayerModal({
   const { identity } = useInternetIdentity();
   const { lang } = useLanguage();
   const recordWatchHistory = useRecordWatchHistory();
+  const recordVideoView = useRecordVideoView();
+  const toggleVideoLike = useToggleVideoLike();
   const { data: allVideos } = useListVideoPosts();
   const followCreator = useFollowCreator();
   const unfollowCreator = useUnfollowCreator();
@@ -1478,12 +1446,17 @@ export function VideoPlayerModal({
     [identity],
   );
 
-  // Views / Like state
-  const [views, setViews] = useState(0);
-  // Like/dislike
-  const [liked, setLiked] = useState(false);
+  // Engagement data — fetched in background, never blocks render
+  const { data: engagementData } = useVideoEngagement(
+    post ? videoIdStr : undefined,
+    userId,
+  );
+  const views = engagementData?.views ?? 0;
+  const likeCount = engagementData?.likes ?? 0;
+  const liked = engagementData?.userLiked ?? false;
+
+  // Dislike is UI-only (not synced)
   const [disliked, setDisliked] = useState(false);
-  const [likeCount, setLikeCount] = useState(0);
 
   // Comments
   const [comments, setComments] = useState<Comment[]>([]);
@@ -1518,17 +1491,11 @@ export function VideoPlayerModal({
   identityRef.current = identity;
 
   // ── reset on open/video change ────────────────────────────────────────────
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally reset on new video
   useEffect(() => {
     if (!open || !post) return;
     const vid = post.id.toString();
     const uid = identityRef.current?.getPrincipal().toString() ?? getGuestId();
-    // Increment view count with 24h dedup, then read canonical count
-    const newViews = incrementVideoViews(vid, uid);
-    setViews(newViews);
-    // Likes
-    setLikeCount(getVideoLikes(vid));
-    setLiked(getUserLikedVideo(vid, uid));
+    // Load dislike status (UI-only, kept in its own key)
     setDisliked(getUserDisliked(vid));
     setComments(loadComments(vid));
     setNewComment("");
@@ -1539,6 +1506,19 @@ export function VideoPlayerModal({
     if (uid && uid !== "guest") updateActiveStatus(uid);
   }, [open, post]);
 
+  // ── deferred view increment (non-blocking, 300ms after open) ─────────────
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally runs on open/post change
+  useEffect(() => {
+    if (!open || !post) return;
+    const uid = identityRef.current?.getPrincipal().toString() ?? getGuestId();
+    const timer = setTimeout(() => {
+      recordVideoView.mutate({ videoId: post.id.toString(), userId: uid });
+    }, 300);
+    return () => clearTimeout(timer);
+    // recordVideoView is stable (useMutation); post.id and open are the intended deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, post?.id]);
+
   // ── subtitle auto-detect ──────────────────────────────────────────────────
   useEffect(() => {
     if (!open) return;
@@ -1547,19 +1527,7 @@ export function VideoPlayerModal({
       : "off";
     setSubtitle(sl);
     if (sl !== "off") void changeSubtitle(sl);
-    // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally only on lang/open
   }, [open, lang]);
-
-  // ── 10-second polling for like count sync ────────────────────────────────
-  useEffect(() => {
-    if (!open || !post) return;
-    const vid = post.id.toString();
-    const interval = setInterval(() => {
-      const latest = getVideoLikes(vid);
-      setLikeCount(latest);
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [open, post]);
 
   // ── playback speed ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1648,45 +1616,19 @@ export function VideoPlayerModal({
 
   // ── like / dislike ────────────────────────────────────────────────────────
   const handleLike = () => {
-    const vid = post?.id.toString() ?? "";
-    if (!liked) {
-      const newCount = getVideoLikes(vid) + 1;
-      try {
-        localStorage.setItem(`vlikes-${vid}`, String(newCount));
-        localStorage.setItem(`vliked-${vid}-${userId}`, "1");
-      } catch {
-        /**/
-      }
-      if (disliked) setDisliked(false);
-      setLiked(true);
-      setLikeCount(newCount);
-    } else {
-      const newCount = Math.max(0, getVideoLikes(vid) - 1);
-      try {
-        localStorage.setItem(`vlikes-${vid}`, String(newCount));
-        localStorage.removeItem(`vliked-${vid}-${userId}`);
-      } catch {
-        /**/
-      }
-      setLiked(false);
-      setLikeCount(newCount);
-    }
+    if (!post || !userId) return;
+    // If currently disliked, remove dislike first
+    if (!liked && disliked) setDisliked(false);
+    toggleVideoLike.mutate({ videoId: post.id.toString(), userId });
   };
+
   const handleDislike = () => {
     const vid = post?.id.toString() ?? "";
     if (!disliked) {
       setDisliked(true);
-      if (liked) {
-        // Un-like when disliking
-        const newCount = Math.max(0, getVideoLikes(vid) - 1);
-        try {
-          localStorage.setItem(`vlikes-${vid}`, String(newCount));
-          localStorage.removeItem(`vliked-${vid}-${userId}`);
-        } catch {
-          /**/
-        }
-        setLiked(false);
-        setLikeCount(newCount);
+      // Un-like via the engagement store if currently liked
+      if (liked && post && userId) {
+        toggleVideoLike.mutate({ videoId: post.id.toString(), userId });
       }
       try {
         localStorage.setItem(`ud-${vid}`, "1");
@@ -1921,6 +1863,19 @@ export function VideoPlayerModal({
                   <ThumbsDown className="w-4 h-4" />
                 </button>
               </div>
+              {/* Comments count */}
+              <button
+                type="button"
+                onClick={() => {
+                  const el = scrollRef.current;
+                  if (el) el.scrollBy({ top: 400, behavior: "smooth" });
+                }}
+                className="flex items-center gap-1.5 bg-secondary/60 hover:bg-secondary px-3.5 py-2 rounded-full text-sm font-semibold text-foreground transition-colors shrink-0"
+                data-ocid="player.comments.button"
+              >
+                <MessageCircle className="w-4 h-4" />
+                {comments.length > 0 ? fmtN(comments.length) : "Comment"}
+              </button>
               {/* Share */}
               <button
                 type="button"

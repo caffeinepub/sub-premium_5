@@ -70,6 +70,14 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     overscroll-behavior: none;
+    touch-action: pan-y;
+  }
+
+  /* Prevent horizontal scroll — mobile app lock */
+  html,
+  body {
+    overflow-x: hidden;
+    max-width: 100%;
   }
 
   /* Ensure full-height layout on mobile */

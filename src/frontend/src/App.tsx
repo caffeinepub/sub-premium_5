@@ -61,8 +61,17 @@ function AppInner() {
   const [creatorProfileRoute, setCreatorProfileRoute] = useState<{
     principalId: string;
   } | null>(null);
+  const [profileTimedOut, setProfileTimedOut] = useState(false);
+  const [initTimedOut, setInitTimedOut] = useState(false);
   const { identity, isInitializing } = useInternetIdentity();
   const isAuthenticated = !!identity;
+
+  // 8-second timeout: if auth init is still pending, show a Retry button
+  useEffect(() => {
+    if (!isInitializing) return;
+    const t = setTimeout(() => setInitTimedOut(true), 8000);
+    return () => clearTimeout(t);
+  }, [isInitializing]);
 
   // Track active status
   useEffect(() => {
@@ -79,12 +88,29 @@ function AppInner() {
     isFetched: profileFetched,
   } = useGetCallerUserProfile();
 
+  // 5-second timeout: if profile is still loading, unblock the UI
+  useEffect(() => {
+    if (!profileLoading) return;
+    const t = setTimeout(() => setProfileTimedOut(true), 5000);
+    return () => clearTimeout(t);
+  }, [profileLoading]);
+
   if (isInitializing) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="w-8 h-8 text-primary animate-spin" />
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <p className="text-sm text-muted-foreground">Restoring session…</p>
+          {initTimedOut && (
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="mt-1 px-4 py-1.5 rounded-full bg-primary text-white text-xs font-semibold hover:bg-primary/90 transition-colors"
+              data-ocid="app.init.retry_button"
+            >
+              Retry
+            </button>
+          )}
         </div>
       </div>
     );
@@ -99,7 +125,7 @@ function AppInner() {
     );
   }
 
-  if (profileLoading && !profileFetched) {
+  if (profileLoading && !profileFetched && !profileTimedOut) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
