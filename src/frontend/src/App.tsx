@@ -42,6 +42,8 @@ type LiveSubRoute =
       streamId: bigint;
       isCreator?: boolean;
       streamTitle?: string;
+      /** True when the creator just finished the Go Live countdown — skip connecting delay */
+      cameFromSetup?: boolean;
     }
   | { type: "analytics"; streamId: bigint }
   | { type: "replay"; streamId: bigint }
@@ -287,6 +289,7 @@ function AppInner() {
                   type: "watch",
                   streamId: liveSubRoute.streamId,
                   isCreator: true,
+                  cameFromSetup: true,
                 })
               }
             />
@@ -301,6 +304,7 @@ function AppInner() {
               key={`live-watch-${liveSubRoute.streamId.toString()}`}
               streamId={liveSubRoute.streamId}
               isCreator={liveSubRoute.isCreator ?? false}
+              isCreatorGoingLive={liveSubRoute.cameFromSetup ?? false}
               streamTitle={liveSubRoute.streamTitle}
               onBack={() => setLiveSubRoute(null)}
               onEndStream={() =>
@@ -455,7 +459,15 @@ function AppInner() {
           }}
           onGoLive={(streamId) => {
             setShowCreateModal(false);
-            setLiveSubRoute({ type: "vertical-setup", streamId });
+            // vertical-setup shows the countdown overlay; after countdown,
+            // onGoLive fires and we transition directly to "watch" as the creator.
+            // cameFromSetup=true skips the 3-second "connecting" delay in LiveWatchPage.
+            setLiveSubRoute({
+              type: "watch",
+              streamId,
+              isCreator: true,
+              cameFromSetup: true,
+            });
           }}
         />
       )}

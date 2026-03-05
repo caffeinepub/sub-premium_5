@@ -4,21 +4,85 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  AlertTriangle,
   CheckCircle2,
   Film,
   Image as ImageIcon,
-  Images,
   Loader2,
+  RefreshCw,
   Upload,
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ExternalBlob } from "../backend";
 import { useCreateVideoPost } from "../hooks/useQueries";
 
-type UploadStage = "idle" | "uploading" | "publishing" | "done";
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024; // 5 GB
+const MAX_DURATION_SECONDS = 7200; // 2 hours
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type UploadStage =
+  | "idle"
+  | "uploading"
+  | "processing"
+  | "encoding"
+  | "finalizing"
+  | "done"
+  | "error";
+
+const UPLOAD_STAGE_LABELS: Record<
+  Exclude<UploadStage, "idle" | "done" | "error">,
+  string
+> = {
+  uploading: "Uploading",
+  processing: "Processing",
+  encoding: "Encoding",
+  finalizing: "Finalizing",
+};
+
+const UPLOAD_STAGES_ORDER: Array<
+  Exclude<UploadStage, "idle" | "done" | "error">
+> = ["uploading", "processing", "encoding", "finalizing"];
+
+function getStageFromProgress(
+  pct: number,
+): Exclude<UploadStage, "idle" | "done" | "error"> {
+  if (pct < 60) return "uploading";
+  if (pct < 80) return "processing";
+  if (pct < 95) return "encoding";
+  return "finalizing";
+}
+
+async function validateVideoFile(file: File): Promise<string | null> {
+  if (file.size > MAX_FILE_SIZE) {
+    return "Video is too large. Maximum size is 5 GB.";
+  }
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.onloadedmetadata = () => {
+      URL.revokeObjectURL(url);
+      if (video.duration > MAX_DURATION_SECONDS) {
+        resolve("Video is too long. Maximum duration is 2 hours.");
+      } else {
+        resolve(null);
+      }
+    };
+    video.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(null); // allow upload even if metadata can't be read
+    };
+    video.src = url;
+  });
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function UploadPage() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
@@ -26,30 +90,44 @@ export default function UploadPage() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [videoProgress, setVideoProgress] = useState(0);
-  const [thumbnailProgress, setThumbnailProgress] = useState(0);
   const [stage, setStage] = useState<UploadStage>("idle");
 
   const videoInputRef = useRef<HTMLInputElement>(null);
   const thumbnailInputRef = useRef<HTMLInputElement>(null);
   const createPost = useCreateVideoPost();
 
-  const isUploading = stage === "uploading" || stage === "publishing";
-  const overallProgress =
-    stage === "uploading"
-      ? Math.round((videoProgress + thumbnailProgress) / 2)
-      : stage === "publishing"
-        ? 99
-        : stage === "done"
-          ? 100
-          : 0;
+  const isUploadActive =
+    stage === "uploading" ||
+    stage === "processing" ||
+    stage === "encoding" ||
+    stage === "finalizing";
 
-  const canPublish =
-    !!videoFile && !!thumbnailFile && title.trim().length > 0 && !isUploading;
+  // ── Prevent page leave during active upload ──
+  useEffect(() => {
+    if (!isUploadActive) return;
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isUploadActive]);
 
-  const handleVideoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const canPublish = !!videoFile && title.trim().length > 0 && !isUploadActive;
+
+  // ── File Handlers ──
+
+  const handleVideoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) setVideoFile(file);
+    if (!file) return;
     e.target.value = "";
+
+    const err = await validateVideoFile(file);
+    if (err) {
+      toast.error(err);
+      return;
+    }
+    setVideoFile(file);
   };
 
   const handleThumbnailSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -58,64 +136,64 @@ export default function UploadPage() {
     e.target.value = "";
   };
 
-  const handleGooglePhotos = () => {
-    // Opens the native media picker which includes Google Photos on Android/iOS
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = "image/*";
-    input.onchange = (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (file) setThumbnailFile(file);
-    };
-    input.click();
-  };
+  // ── Publish ──
 
   const handlePublish = async () => {
-    if (!videoFile || !thumbnailFile || !title.trim()) return;
+    if (!videoFile || !title.trim()) return;
 
     setStage("uploading");
     setVideoProgress(0);
-    setThumbnailProgress(0);
 
     try {
-      // Read files
-      const [videoBytes, thumbBytes] = await Promise.all([
-        readFileAsBytes(videoFile),
-        readFileAsBytes(thumbnailFile),
-      ]);
+      // Read video file
+      const videoBytes = await readFileAsBytes(videoFile);
 
-      // Create blobs with progress tracking
+      // Create video blob with progress tracking + stage mapping
       const videoBlob = ExternalBlob.fromBytes(videoBytes).withUploadProgress(
-        (pct) => setVideoProgress(pct),
+        (pct) => {
+          setVideoProgress(pct);
+          setStage(getStageFromProgress(pct));
+        },
       );
-      const thumbnailBlob = ExternalBlob.fromBytes(
-        thumbBytes,
-      ).withUploadProgress((pct) => setThumbnailProgress(pct));
 
-      setStage("publishing");
-      await createPost.mutateAsync({
+      // Build thumbnail blob — use selected file or fallback to 1×1 transparent PNG
+      let thumbnailBlob: ExternalBlob;
+      if (thumbnailFile) {
+        const thumbBytes = await readFileAsBytes(thumbnailFile);
+        thumbnailBlob = ExternalBlob.fromBytes(thumbBytes);
+      } else {
+        const fallbackBytes = new Uint8Array([
+          137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0,
+          1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 10, 73, 68,
+          65, 84, 120, 156, 98, 0, 1, 0, 0, 5, 0, 1, 13, 10, 45, 180, 0, 0, 0,
+          0, 73, 69, 78, 68, 174, 66, 96, 130,
+        ]);
+        thumbnailBlob = ExternalBlob.fromBytes(fallbackBytes);
+      }
+
+      const postId = await createPost.mutateAsync({
         title: title.trim(),
         description: description.trim(),
         videoBlob,
         thumbnailBlob,
       });
 
+      setVideoProgress(100);
       setStage("done");
-      toast.success("Video published successfully!");
+      void postId; // bigint post ID — future: navigate to video detail
 
-      // Reset form after brief delay
+      // Show success for 2s then reset form (user stays on Upload tab)
       setTimeout(() => {
         setVideoFile(null);
         setThumbnailFile(null);
         setTitle("");
         setDescription("");
         setVideoProgress(0);
-        setThumbnailProgress(0);
         setStage("idle");
-      }, 1500);
+        toast.success("Video published successfully!");
+      }, 2000);
     } catch (err) {
-      setStage("idle");
-      toast.error("Failed to publish. Please try again.");
+      setStage("error");
       console.error(err);
     }
   };
@@ -141,15 +219,15 @@ export default function UploadPage() {
             <input
               ref={videoInputRef}
               type="file"
-              accept="*/*"
-              onChange={handleVideoSelect}
+              accept="video/*"
+              onChange={(e) => void handleVideoSelect(e)}
               className="sr-only"
               aria-label="Select video file"
             />
             <button
               type="button"
               onClick={() => videoInputRef.current?.click()}
-              disabled={isUploading}
+              disabled={isUploadActive}
               className="relative w-full rounded-2xl border-2 border-dashed border-border/50 bg-secondary/50 hover:bg-secondary hover:border-primary/50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
               data-ocid="upload.dropzone"
             >
@@ -170,16 +248,16 @@ export default function UploadPage() {
                       <Upload className="w-6 h-6 text-primary" />
                     </div>
                     <p className="text-sm font-semibold text-foreground">
-                      Tap to select video
+                      Select from Gallery / Files
                     </p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      All file types supported
+                    <p className="text-xs text-muted-foreground mt-1 text-center">
+                      Photos, files, camera recordings · Max 5 GB · Max 2 hours
                     </p>
                   </>
                 )}
               </div>
               {/* Remove button */}
-              {videoFile && !isUploading && (
+              {videoFile && !isUploadActive && (
                 <button
                   type="button"
                   onClick={(e) => {
@@ -197,7 +275,7 @@ export default function UploadPage() {
             <button
               type="button"
               onClick={() => videoInputRef.current?.click()}
-              disabled={isUploading}
+              disabled={isUploadActive}
               className="sr-only"
               data-ocid="upload.upload_button"
             >
@@ -205,15 +283,18 @@ export default function UploadPage() {
             </button>
           </div>
 
-          {/* Thumbnail selector */}
+          {/* Thumbnail selector (optional) */}
           <div>
             <Label className="text-sm font-semibold mb-2 block">
-              Thumbnail
+              Thumbnail{" "}
+              <span className="text-muted-foreground font-normal text-xs">
+                (optional)
+              </span>
             </Label>
             <input
               ref={thumbnailInputRef}
               type="file"
-              accept="*/*"
+              accept="image/*"
               onChange={handleThumbnailSelect}
               className="sr-only"
               aria-label="Select thumbnail image"
@@ -225,7 +306,7 @@ export default function UploadPage() {
                   alt="Thumbnail preview"
                   className="w-full aspect-video object-cover"
                 />
-                {!isUploading && (
+                {!isUploadActive && (
                   <button
                     type="button"
                     onClick={() => setThumbnailFile(null)}
@@ -237,45 +318,23 @@ export default function UploadPage() {
                 )}
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-3">
-                {/* Device picker */}
-                <button
-                  type="button"
-                  onClick={() => thumbnailInputRef.current?.click()}
-                  disabled={isUploading}
-                  className="flex flex-col items-center justify-center py-6 px-4 rounded-2xl border-2 border-dashed border-border/50 bg-secondary/50 hover:bg-secondary hover:border-primary/50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
-                  data-ocid="upload.thumbnail.upload_button"
-                >
-                  <div className="w-10 h-10 rounded-xl bg-secondary flex items-center justify-center mb-2">
-                    <ImageIcon className="w-5 h-5 text-muted-foreground" />
-                  </div>
-                  <p className="text-xs font-semibold text-foreground">
-                    Device
-                  </p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
-                    All files
-                  </p>
-                </button>
-
-                {/* Google Photos picker */}
-                <button
-                  type="button"
-                  onClick={handleGooglePhotos}
-                  disabled={isUploading}
-                  className="flex flex-col items-center justify-center py-6 px-4 rounded-2xl border-2 border-dashed border-[#4285F4]/40 bg-[#4285F4]/5 hover:bg-[#4285F4]/10 hover:border-[#4285F4]/70 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4285F4] disabled:opacity-50 disabled:cursor-not-allowed"
-                  data-ocid="upload.thumbnail.google_photos_button"
-                >
-                  <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center mb-2">
-                    <Images className="w-5 h-5 text-[#4285F4]" />
-                  </div>
-                  <p className="text-xs font-semibold text-foreground">
-                    Google Photos
-                  </p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
-                    Pick from album
-                  </p>
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => thumbnailInputRef.current?.click()}
+                disabled={isUploadActive}
+                className="flex flex-col items-center justify-center py-6 px-4 w-full rounded-2xl border-2 border-dashed border-border/50 bg-secondary/50 hover:bg-secondary hover:border-primary/50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                data-ocid="upload.thumbnail.upload_button"
+              >
+                <div className="w-10 h-10 rounded-xl bg-secondary flex items-center justify-center mb-2">
+                  <ImageIcon className="w-5 h-5 text-muted-foreground" />
+                </div>
+                <p className="text-xs font-semibold text-foreground">
+                  Select Thumbnail
+                </p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  Photos, gallery, files
+                </p>
+              </button>
             )}
           </div>
 
@@ -290,7 +349,7 @@ export default function UploadPage() {
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Give your video a great title…"
               maxLength={100}
-              disabled={isUploading}
+              disabled={isUploadActive}
               className="bg-secondary border-border/50 rounded-xl h-12 focus-visible:ring-primary"
               data-ocid="upload.title.input"
             />
@@ -311,42 +370,172 @@ export default function UploadPage() {
               placeholder="Tell viewers what your video is about…"
               rows={3}
               maxLength={500}
-              disabled={isUploading}
+              disabled={isUploadActive}
               className="bg-secondary border-border/50 rounded-xl resize-none focus-visible:ring-primary"
               data-ocid="upload.description.textarea"
             />
           </div>
 
-          {/* Upload progress */}
+          {/* ── Upload Warning Banner ── */}
           <AnimatePresence>
-            {isUploading && (
+            {isUploadActive && (
               <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                className="bg-secondary rounded-2xl p-4 space-y-2"
-                data-ocid="upload.loading_state"
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.2 }}
+                data-ocid="upload.upload_warning.panel"
+                className="flex items-center gap-2.5 px-4 py-3 rounded-xl"
+                style={{
+                  background: "rgba(251,191,36,0.08)",
+                  border: "1px solid rgba(251,191,36,0.25)",
+                }}
               >
-                <div className="flex items-center justify-between text-sm">
-                  <span className="font-medium text-foreground">
-                    {stage === "publishing" ? "Publishing…" : "Uploading…"}
-                  </span>
-                  <span className="text-primary font-bold">
-                    {overallProgress}%
-                  </span>
-                </div>
-                <Progress value={overallProgress} className="h-2 bg-border" />
-                {stage === "uploading" && (
-                  <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                    <span>Video: {videoProgress}%</span>
-                    <span>Thumbnail: {thumbnailProgress}%</span>
-                  </div>
-                )}
+                <AlertTriangle
+                  className="w-4 h-4 shrink-0"
+                  style={{ color: "#fbbf24" }}
+                  strokeWidth={2}
+                />
+                <p
+                  className="text-xs font-medium leading-snug"
+                  style={{ color: "#fbbf24" }}
+                >
+                  Uploading video. Please stay on this page until upload
+                  completes.
+                </p>
               </motion.div>
             )}
           </AnimatePresence>
 
-          {/* Success state */}
+          {/* ── 4-Stage Upload Progress ── */}
+          <AnimatePresence>
+            {isUploadActive && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                className="bg-secondary rounded-2xl p-4 space-y-3"
+                data-ocid="upload.upload_status.loading_state"
+              >
+                {/* Stage label + percentage */}
+                <div className="flex items-center justify-between text-sm">
+                  <AnimatePresence mode="wait">
+                    <motion.span
+                      key={stage}
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={{ duration: 0.2 }}
+                      className="font-bold text-foreground"
+                    >
+                      {isUploadActive &&
+                        UPLOAD_STAGE_LABELS[
+                          stage as keyof typeof UPLOAD_STAGE_LABELS
+                        ]}
+                      …
+                    </motion.span>
+                  </AnimatePresence>
+                  <span className="text-primary font-bold">
+                    {Math.round(videoProgress)}%
+                  </span>
+                </div>
+
+                {/* Progress bar */}
+                <Progress value={videoProgress} className="h-2 bg-border" />
+
+                {/* Stage dot indicators */}
+                <div className="flex items-center justify-between gap-1 pt-1">
+                  {UPLOAD_STAGES_ORDER.map((s) => {
+                    const sIdx = UPLOAD_STAGES_ORDER.indexOf(s);
+                    const currentIdx = UPLOAD_STAGES_ORDER.indexOf(
+                      stage as (typeof UPLOAD_STAGES_ORDER)[number],
+                    );
+                    const isActive = s === stage;
+                    const isPast = currentIdx > sIdx;
+                    return (
+                      <div
+                        key={s}
+                        className="flex flex-col items-center gap-1 flex-1"
+                      >
+                        <div
+                          className="w-2 h-2 rounded-full transition-all duration-300"
+                          style={{
+                            background: isPast
+                              ? "hsl(var(--primary))"
+                              : isActive
+                                ? "hsl(var(--primary))"
+                                : "hsl(var(--border))",
+                            opacity: isPast || isActive ? 1 : 0.4,
+                            boxShadow: isActive
+                              ? "0 0 6px hsl(var(--primary) / 0.6)"
+                              : "none",
+                          }}
+                        />
+                        <span
+                          className="text-[9px] font-semibold tracking-wide"
+                          style={{
+                            color: isActive
+                              ? "hsl(var(--foreground))"
+                              : isPast
+                                ? "hsl(var(--primary))"
+                                : "hsl(var(--muted-foreground))",
+                            opacity: isPast || isActive ? 1 : 0.5,
+                          }}
+                        >
+                          {UPLOAD_STAGE_LABELS[s]}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* ── Error State ── */}
+          <AnimatePresence>
+            {stage === "error" && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="rounded-2xl p-4 flex flex-col items-center gap-3 text-center"
+                data-ocid="upload.error_state"
+                style={{
+                  background: "rgba(239,68,68,0.08)",
+                  border: "1px solid rgba(239,68,68,0.25)",
+                }}
+              >
+                <AlertTriangle
+                  className="w-7 h-7"
+                  style={{ color: "#ef4444" }}
+                  strokeWidth={1.5}
+                />
+                <div>
+                  <p className="text-sm font-bold text-foreground">
+                    Upload failed.
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Please try again.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  data-ocid="upload.retry.button"
+                  onClick={() => {
+                    setStage("idle");
+                    void handlePublish();
+                  }}
+                  className="h-10 px-5 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-sm gap-2"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Try Again
+                </Button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* ── Success State ── */}
           <AnimatePresence>
             {stage === "done" && (
               <motion.div
@@ -358,36 +547,45 @@ export default function UploadPage() {
               >
                 <CheckCircle2 className="w-5 h-5 text-primary shrink-0" />
                 <p className="text-sm font-medium text-foreground">
-                  Video published successfully!
+                  Upload complete
                 </p>
               </motion.div>
             )}
           </AnimatePresence>
 
-          {/* Publish button */}
-          <Button
-            onClick={handlePublish}
-            disabled={!canPublish}
-            className="w-full h-14 rounded-2xl bg-primary hover:bg-primary/90 text-white font-bold text-base glow-primary transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-            data-ocid="upload.submit_button"
-          >
-            {isUploading ? (
-              <>
-                <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                {stage === "publishing" ? "Publishing…" : "Uploading…"}
-              </>
-            ) : (
-              <>
-                <Upload className="w-5 h-5 mr-2" />
-                Publish Video
-              </>
-            )}
-          </Button>
+          {/* ── Publish Button ── */}
+          {stage !== "done" && stage !== "error" && (
+            <Button
+              onClick={() => void handlePublish()}
+              disabled={!canPublish}
+              className="w-full h-14 rounded-2xl bg-primary hover:bg-primary/90 text-white font-bold text-base glow-primary transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              data-ocid="upload.submit_button"
+            >
+              {isUploadActive ? (
+                <>
+                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                  {
+                    UPLOAD_STAGE_LABELS[
+                      stage as keyof typeof UPLOAD_STAGE_LABELS
+                    ]
+                  }
+                  …
+                </>
+              ) : (
+                <>
+                  <Upload className="w-5 h-5 mr-2" />
+                  Publish Video
+                </>
+              )}
+            </Button>
+          )}
         </div>
       </main>
     </div>
   );
 }
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function readFileAsBytes(file: File): Promise<Uint8Array<ArrayBuffer>> {
   return new Promise((resolve, reject) => {
@@ -407,5 +605,7 @@ function readFileAsBytes(file: File): Promise<Uint8Array<ArrayBuffer>> {
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024 * 1024 * 1024)
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }

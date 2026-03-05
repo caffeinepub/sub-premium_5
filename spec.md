@@ -2,55 +2,78 @@
 
 ## Current State
 
-The app has a bottom navigation with 6 tabs: Home, Shorts, Upload, Go Live (center red circle), History, Profile. Upload and Go Live are separate tab destinations. Tapping "Upload" navigates to UploadPage. Tapping the Go Live center button navigates to LivePage (setup). There is no unified Create modal.
+The app has two upload surfaces:
+1. **CreateModal.tsx** — `UploadSlide` component inside the swipe modal. Has a basic `<input type="file" accept="video/*">` button. No duration/size validation, no upload stages, no page-leave prevention, no auto-navigate to video page on completion.
+2. **UploadPage.tsx** — Standalone upload page at `/upload`. Uses `accept="*/*"` (no video restriction), requires both video and thumbnail to publish (no fallback), shows upload/publishing stages but only 2 states (Uploading / Publishing), no page-leave prevention, no auto-navigate on completion, no size/duration validation.
+
+Neither surface:
+- Validates file size or video duration
+- Prevents the user from navigating away during upload
+- Shows granular upload stages (Uploading → Processing → Encoding → Finalizing)
+- Auto-navigates to the video detail page on success
+- Allows retry after failure without a full reset
 
 ## Requested Changes (Diff)
 
 ### Add
-- `CreateModal` component: full-screen modal with 3-slide horizontal swipe navigation
-  - Slide 0 (left): Upload — large upload icon, title, "Select From Gallery" button, drag & drop area, dark minimal layout, no camera, navigates to edit/upload screen on file select
-  - Slide 1 (center/default): Shorts camera — fullscreen camera preview, large red record button, top-left X close, top-right Effects icon, right vertical tools (flip, timer, 15s/60s toggle), "Short (0–60s)" label above record button
-  - Slide 2 (right): Go Live — live title input, privacy selector, schedule toggle, large "GO LIVE" button, 3-2-1 countdown overlay (camera stays mounted), transitions to LiveWatchPage after countdown
-- Page indicator: 3 dots at top of modal showing active slide
-- Smooth swipe/drag horizontal transition between slides (touch and mouse)
+- `accept="video/*"` with `capture` fallback to open the native device file picker on mobile (photos, files, camera, screen recordings, downloads — all surfaces the OS exposes for video)
+- File size validation: reject files > 5 GB with a clear error message before upload begins
+- Duration validation: after file selection, load video metadata and reject videos > 2 hours (7200 seconds) with a clear error message
+- Upload stage progression in both upload surfaces: **Uploading → Processing → Encoding → Finalizing** with animated stage labels
+- Page-leave prevention during active upload: `beforeunload` event listener + on-screen banner "Uploading video. Please stay on this page until upload completes."
+- Auto-navigate to `/video/:id` after successful upload (using the returned post ID)
+- Retry button after upload failure — resets only the upload state, not the whole form (title, description, file selection preserved)
+- Updated file selector copy in CreateModal UploadSlide: "Select Video" with subtitle clarifying all device video sources are supported (gallery, files, camera)
+- `formatFileSize` helper with GB support (5 GB limit display)
 
 ### Modify
-- `BottomNav`: Replace the Go Live center red circle and Upload tab with a single "+" center button that opens the CreateModal. Remove `upload` and `live` from tab list. New left group: Home, Shorts. New right group: History, Profile. Center: "+" button (same elevated red circle style).
-- `App.tsx`: Add `showCreateModal` state. Wire "+" button to open/close modal. Remove `upload` and `live` tab case rendering (those flows now only accessible from CreateModal). Keep existing LiveVerticalSetupPage, LiveWatchPage etc. sub-routes intact for when Go Live is triggered from CreateModal.
-- `TabId` type: Remove `upload` and `live` from union. Keep `home | shorts | history | profile`.
+- **CreateModal.tsx → UploadSlide**: 
+  - Change video `<input>` to use `accept="video/*"` (triggers native OS picker with photo library, files, camera rolls on both iOS and Android)
+  - Add file size + duration validation on video select
+  - Expand `UploadStage` type to include `"processing" | "encoding" | "finalizing"`
+  - Replace simple progress bar with animated stage indicator showing current stage name + bar
+  - Add `beforeunload` listener when uploading, remove on cleanup
+  - On success: show "Upload complete" message then navigate to `/video/:id`
+  - On failure: show "Upload failed. Please try again." with a Retry button that preserves form state
+  - Update empty-state button label to "Select from Gallery / Files" to signal device-wide access
+  
+- **UploadPage.tsx**:
+  - Change video input `accept` from `"*/*"` to `"video/*"`
+  - Add file size + duration validation on video select
+  - Remove hard requirement for thumbnail (already optional in CreateModal — use fallback PNG if none)
+  - Expand upload stages to 4: Uploading → Processing → Encoding → Finalizing
+  - Add `beforeunload` page-leave prevention during upload
+  - Add on-screen sticky banner during upload: "Uploading video. Please stay on this page until upload completes."
+  - On success: navigate to `/video/:id` automatically after 1.5s
+  - On failure: show retry button that preserves form data
 
 ### Remove
-- Upload tab from BottomNav left group
-- Live (Go Live) center button from BottomNav (replaced by "+" create button)
-- No separate Upload/Live tab routes from BottomNav navigation
+- Hard thumbnail requirement in `UploadPage.tsx` (already optional in CreateModal; use the 1×1 PNG fallback)
+- The `"*/*"` accept attribute on both video inputs (replaced by `"video/*"`)
 
 ## Implementation Plan
 
-1. Create `src/frontend/src/components/CreateModal.tsx`:
-   - Full-screen overlay (fixed inset-0, z-50, bg-black)
-   - 3-slide carousel using touch events (onTouchStart/Move/End) + mouse drag
-   - Default slide index = 1 (Shorts)
-   - Page dots indicator at top
-   - Slide 0: Upload panel — reuses UploadPage logic inline (file picker, dropzone), on file select calls `onUploadSelected(file)` prop
-   - Slide 1: Shorts camera panel — camera preview via getUserMedia, record button, flip/timer/duration tools, close/effects icons
-   - Slide 2: Go Live panel — title input, privacy selector (Public/Followers/Private), schedule toggle, GO LIVE button triggers countdown overlay, on countdown finish calls `onGoLive(streamId)` prop
-   - Close button (X) on Shorts slide closes modal
+1. **Both upload surfaces — video input accept + file validation**
+   - Set `accept="video/*"` on all video `<input>` elements
+   - After file selection, validate file size ≤ 5 GB; if exceeded, show toast error and clear selection
+   - After file selection, load video duration via `HTMLVideoElement.duration`; if > 7200s, show toast error and clear selection
 
-2. Modify `BottomNav.tsx`:
-   - Remove `upload` and `live` from tab arrays
-   - Change center button from Go Live (Radio icon) to Create "+" (Plus icon)
-   - Center button calls `onCreatePress` prop instead of `onTabChange("live")`
-   - Update `BottomNavProps` to add `onCreatePress: () => void`
-   - Update `TabId` to remove `upload | live`
+2. **UploadSlide in CreateModal.tsx — staged upload + navigation**
+   - Expand `UploadStage` to `"idle" | "uploading" | "processing" | "encoding" | "finalizing" | "done" | "error"`
+   - Replace simple `Uploading…` text with animated `<StageIndicator>` component showing stage name + progress bar
+   - Add `useEffect` to attach/detach `beforeunload` listener based on active upload state
+   - Show sticky warning banner when uploading
+   - On success: set stage to `"done"`, show "Upload complete", then `navigate('/video/${postId}')` after 1.5s
+   - On error: set stage to `"error"`, show "Upload failed. Please try again." + Retry button that calls `handlePublish` again without clearing form
 
-3. Modify `App.tsx`:
-   - Add `showCreateModal` state (boolean)
-   - Pass `onCreatePress={() => setShowCreateModal(true)}` to BottomNav
-   - Render `<CreateModal>` when `showCreateModal` is true
-   - Wire `onClose` to close modal
-   - Wire `onUploadSelected` → close modal + navigate to upload sub-flow (open UploadPage with pre-selected file)
-   - Wire `onGoLive(streamId)` → close modal + set activeTab="live" + setLiveSubRoute to vertical-setup
-   - Remove `case "upload"` and `case "live"` from tab renderer (or keep upload as internal page reached only from modal)
-   - Update `TabId` import
+3. **UploadPage.tsx — staged upload + navigation + optional thumbnail**
+   - Remove thumbnail hard requirement from `canPublish`
+   - Expand stage labels to 4-stage sequence
+   - Add `beforeunload` listener
+   - Add on-screen warning banner during upload
+   - On success: `navigate('/video/${postId}')` after 1.5s
+   - On failure: show retry button without clearing form state
 
-4. Update `isFullScreenRoute` logic in App.tsx to also hide nav when CreateModal is open
+4. **UX copy updates**
+   - UploadSlide empty state: "Select from Gallery / Files" with subtitle "Camera, screen recordings, downloads"
+   - UploadPage dropzone: "Tap to select video" with subtitle "Photos, files, camera recordings · Max 5 GB, 2 hrs"

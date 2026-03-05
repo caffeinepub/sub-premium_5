@@ -81,6 +81,8 @@ interface LiveWatchPageProps {
   onBattleHistory?: () => void;
   onWeeklyLeaderboard?: () => void;
   isCreator?: boolean;
+  /** True when the creator just completed the Go Live countdown — skip the 3-second connecting delay */
+  isCreatorGoingLive?: boolean;
   streamTitle?: string;
   /** Principal string of the creator — used to open their profile */
   creatorPrincipal?: string;
@@ -337,6 +339,7 @@ export default function LiveWatchPage({
   onBattleHistory,
   onWeeklyLeaderboard,
   isCreator = false,
+  isCreatorGoingLive = false,
   streamTitle = "Live Stream",
   creatorPrincipal,
   currentUserPrincipal,
@@ -356,8 +359,11 @@ export default function LiveWatchPage({
   const [micEnabled, setMicEnabled] = useState(true);
   const [chatLocked, setChatLocked] = useState(false);
 
-  // Stream state machine — never shows blank screen
-  const [streamState, setStreamState] = useState<StreamState>("connecting");
+  // Stream state machine — never shows blank screen.
+  // When the creator just finished the countdown, start immediately in "live" state.
+  const [streamState, setStreamState] = useState<StreamState>(
+    isCreatorGoingLive ? "live" : "connecting",
+  );
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -579,14 +585,15 @@ export default function LiveWatchPage({
     ]);
   }, []);
 
-  // Stream state machine: connecting → live after 3s
-  // Video container is ALWAYS mounted; only overlay changes
+  // Stream state machine: connecting → live after 3s.
+  // Skip entirely when creator just finished the Go Live countdown — already live.
   useEffect(() => {
+    if (isCreatorGoingLive) return; // Already live — no connecting delay
     const connectTimer = setTimeout(() => {
       setStreamState("live");
     }, 3000);
     return () => clearTimeout(connectTimer);
-  }, []);
+  }, [isCreatorGoingLive]);
 
   // Reconnect retry logic — auto-retries every 3s, succeeds after 3 attempts
   useEffect(() => {
@@ -892,12 +899,15 @@ export default function LiveWatchPage({
           />
         ) : (
           <>
-            {/* Background gradient — ALWAYS rendered, never unmounted */}
+            {/* Background gradient — ALWAYS rendered, never unmounted.
+                Creator gets a warmer, more vivid red-tinted background so the
+                screen never looks dark or inactive after going live. */}
             <div
               className="w-full h-full"
               style={{
-                background:
-                  "radial-gradient(ellipse at 30% 40%, #1a0a2e 0%, #0a0a1a 50%, #000 100%)",
+                background: isCreator
+                  ? "radial-gradient(ellipse at 30% 40%, #2a0a0a 0%, #1a0505 50%, #0a0000 100%)"
+                  : "radial-gradient(ellipse at 30% 40%, #1a0a2e 0%, #0a0a1a 50%, #000 100%)",
               }}
             />
             <motion.div
@@ -905,12 +915,50 @@ export default function LiveWatchPage({
               transition={{ duration: 2, repeat: Number.POSITIVE_INFINITY }}
               className="absolute inset-0 pointer-events-none"
               style={{
-                background:
-                  "radial-gradient(ellipse at 50% 30%, rgba(255,45,45,0.08) 0%, transparent 70%)",
+                background: isCreator
+                  ? "radial-gradient(ellipse at 50% 30%, rgba(255,45,45,0.18) 0%, transparent 60%)"
+                  : "radial-gradient(ellipse at 50% 30%, rgba(255,45,45,0.08) 0%, transparent 70%)",
               }}
             />
-            {/* Double-tap hint — only visible when stream is live */}
-            {streamState === "live" && (
+
+            {/* YOU ARE LIVE watermark — creator only, shown once stream is live */}
+            {isCreator && streamState === "live" && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.85 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.5, ease: "easeOut" }}
+                className="absolute inset-0 flex items-center justify-center pointer-events-none"
+                style={{ top: "30%" }}
+              >
+                <div className="flex flex-col items-center gap-2 select-none">
+                  <motion.div
+                    animate={{ opacity: [0.55, 0.9, 0.55] }}
+                    transition={{
+                      duration: 1.8,
+                      repeat: Number.POSITIVE_INFINITY,
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <span className="relative flex w-3 h-3" aria-hidden="true">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75" />
+                      <span className="relative inline-flex rounded-full w-3 h-3 bg-red-500" />
+                    </span>
+                    <span
+                      className="font-black text-sm tracking-[0.25em] uppercase"
+                      style={{
+                        color: "rgba(255,255,255,0.65)",
+                        textShadow: "0 0 16px rgba(255,45,45,0.6)",
+                      }}
+                    >
+                      YOU ARE LIVE
+                    </span>
+                  </motion.div>
+                </div>
+              </motion.div>
+            )}
+
+            {/* Double-tap hint — viewer only, visible when stream is live */}
+            {!isCreator && streamState === "live" && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <div className="flex flex-col items-center gap-3 opacity-20">
                   <div className="w-20 h-20 rounded-full border-2 border-white/30 flex items-center justify-center">
