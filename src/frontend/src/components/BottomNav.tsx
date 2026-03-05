@@ -115,11 +115,17 @@ export function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
         background: "#0E0E0E",
         borderRadius: "20px 20px 0 0",
         boxShadow: "0 -4px 20px rgba(0,0,0,0.5)",
-        position: "relative",
-        zIndex: 1,
+        position: "fixed",
+        bottom: 0,
+        left: "50%",
+        transform: "translateX(-50%)",
+        width: "100%",
+        maxWidth: 430,
+        zIndex: 40,
+        paddingBottom: "env(safe-area-inset-bottom)",
       }}
     >
-      <div className="flex items-stretch h-16 pb-safe">
+      <div className="flex items-stretch" style={{ minHeight: 70 }}>
         {/* Left tabs */}
         {regularTabs.map(({ id, label, icon: Icon, ocid }) =>
           renderTab(id, label, Icon, ocid, false),

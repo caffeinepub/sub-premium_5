@@ -406,9 +406,14 @@ function AppInner() {
           className="relative flex flex-col bg-background w-full max-w-[430px] min-h-screen overflow-hidden"
           style={{ boxShadow: "0 0 60px oklch(0 0 0 / 0.5)" }}
         >
-          {/* Page content */}
+          {/* Page content — bottom padding accounts for fixed nav height + safe area */}
           <div
             className={`flex-1 overflow-hidden relative ${isShortsPage ? "bg-black" : ""}`}
+            style={
+              !isFullScreenRoute
+                ? { paddingBottom: "calc(70px + env(safe-area-inset-bottom))" }
+                : undefined
+            }
           >
             <AnimatePresence mode="wait">
               <motion.div

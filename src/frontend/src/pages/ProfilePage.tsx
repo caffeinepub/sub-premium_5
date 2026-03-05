@@ -1425,17 +1425,20 @@ export default function ProfilePage({
   // Battle stats for profile display
   const { battleStats } = useLiveBattle();
 
-  // Use extended profile name if available, fallback to username
-  const displayName =
-    extendedProfile?.name ||
-    extendedProfile?.username ||
-    username ||
-    "Anonymous";
-  const initials = displayName.slice(0, 2).toUpperCase();
   const principalStr = identity?.getPrincipal().toString() ?? "";
   const shortPrincipalStr = principalStr
     ? `${principalStr.slice(0, 8)}…${principalStr.slice(-4)}`
     : "";
+
+  // Use extended profile name if available, fallback to username or short principal
+  const rawDisplayName =
+    extendedProfile?.name || extendedProfile?.username || username || "";
+  const displayName =
+    rawDisplayName ||
+    (principalStr ? `user_${principalStr.slice(0, 5)}` : "User");
+  const initials = rawDisplayName
+    ? rawDisplayName.slice(0, 2).toUpperCase()
+    : "U";
 
   const lastActiveAt = principalStr ? getActiveStatus(principalStr) : null;
   const { isOnline, label: activeLabel } = formatActiveStatus(lastActiveAt);

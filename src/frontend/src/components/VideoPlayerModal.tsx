@@ -1428,6 +1428,9 @@ export function VideoPlayerModal({
   // PiP state
   const [pipActive, setPipActive] = useState(false);
 
+  // Subscribe overlay (appears at 3s)
+  const [showSubscribeOverlay, setShowSubscribeOverlay] = useState(false);
+
   // Actions
   const [playlistOpen, setPlaylistOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -1437,7 +1440,7 @@ export function VideoPlayerModal({
   // Per-video derived
   const videoIdStr = post?.id.toString() ?? "";
   const creatorName = creatorUsername ?? "unknown";
-  const currentUser = currentUsername ?? "Anonymous";
+  const currentUser = currentUsername ?? "User";
 
   // Stable userId (principal or guestId fallback)
   const userId = useMemo(
@@ -1490,7 +1493,25 @@ export function VideoPlayerModal({
   const identityRef = useRef(identity);
   identityRef.current = identity;
 
+  // ── swipe-down-to-close ───────────────────────────────────────────────────
+  // Declared here so it's available in the reset effect below
+  const dragY = useMotionValue(0);
+  const bgOpacity = useTransform(dragY, [0, 200], [1, 0.5]);
+  const scale = useTransform(dragY, [0, 200], [1, 0.95]);
+
+  const handleSwipeDragEnd = useCallback(
+    (_: unknown, info: { offset: { y: number }; velocity: { y: number } }) => {
+      if (info.offset.y > 100 || info.velocity.y > 500) {
+        onClose();
+      } else {
+        dragY.set(0);
+      }
+    },
+    [onClose, dragY],
+  );
+
   // ── reset on open/video change ────────────────────────────────────────────
+  // biome-ignore lint/correctness/useExhaustiveDependencies: dragY is a stable MotionValue ref
   useEffect(() => {
     if (!open || !post) return;
     const vid = post.id.toString();
@@ -1502,6 +1523,8 @@ export function VideoPlayerModal({
     setDescExpanded(false);
     setShowEndScreen(false);
     setPipActive(false);
+    setShowSubscribeOverlay(false);
+    dragY.set(0);
     mutateRef.current(post.id);
     if (uid && uid !== "guest") updateActiveStatus(uid);
   }, [open, post]);
@@ -1517,6 +1540,19 @@ export function VideoPlayerModal({
     return () => clearTimeout(timer);
     // recordVideoView is stable (useMutation); post.id and open are the intended deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, post?.id]);
+
+  // ── subscribe overlay at 3s ──────────────────────────────────────────────
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally runs on open/post change
+  useEffect(() => {
+    if (!open || !post) return;
+    // Show overlay 3 seconds after the video opens, hide after 5 seconds
+    const showTimer = setTimeout(() => setShowSubscribeOverlay(true), 3000);
+    const hideTimer = setTimeout(() => setShowSubscribeOverlay(false), 8000);
+    return () => {
+      clearTimeout(showTimer);
+      clearTimeout(hideTimer);
+    };
   }, [open, post?.id]);
 
   // ── subtitle auto-detect ──────────────────────────────────────────────────
@@ -1713,395 +1749,463 @@ export function VideoPlayerModal({
         <DialogContent
           className="bg-card border-border/50 p-0 max-w-lg w-full rounded-3xl overflow-hidden"
           data-ocid="home.video.modal"
+          style={{ overflow: "visible" }}
         >
-          {/* Close */}
-          <button
-            type="button"
-            onClick={onClose}
-            className="absolute right-3 top-3 z-50 w-8 h-8 rounded-full bg-black/60 flex items-center justify-center text-white/80 hover:text-white hover:bg-black/80 transition-colors"
-            aria-label="Close"
-            data-ocid="home.video.close_button"
+          {/* Animated wrapper — provides the drag transform */}
+          <motion.div
+            style={{ y: dragY, opacity: bgOpacity, scale }}
+            className="rounded-3xl overflow-hidden bg-card"
           >
-            <X className="w-4 h-4" />
-          </button>
-
-          {/* Scrollable body */}
-          <div
-            ref={scrollRef}
-            className="max-h-[92vh] overflow-y-auto scrollbar-hide"
-          >
-            {/* ── 1. VIDEO PLAYER (full width) ──────────────────────── */}
-            <div
-              ref={videoWrapRef}
-              className="relative bg-black w-full aspect-video"
+            {/* Drag handle */}
+            <motion.div
+              drag="y"
+              dragConstraints={{ top: 0, bottom: 0 }}
+              dragElastic={{ top: 0, bottom: 0.5 }}
+              onDrag={(_, info) => {
+                if (info.offset.y > 0) dragY.set(info.offset.y);
+              }}
+              onDragEnd={handleSwipeDragEnd}
+              className="flex justify-center items-center h-7 cursor-grab active:cursor-grabbing touch-none z-50 bg-card"
+              data-ocid="player.swipe_handle.drag_handle"
+              aria-label="Swipe down to close"
             >
-              {/* biome-ignore lint/a11y/useMediaCaption: user-generated content; custom subtitle overlay */}
-              <video
-                ref={videoRef}
-                src={post.videoBlob.getDirectURL()}
-                controls
-                autoPlay
-                playsInline
-                className="w-full h-full object-contain"
-                onTimeUpdate={handleTimeUpdate}
-                onEnded={() => setShowEndScreen(true)}
-              />
-              <SubtitleOverlay
-                lang={subtitle}
-                translating={translating}
-                lines={subtitleLines}
-              />
-              {/* Settings gear */}
-              <button
-                type="button"
-                onClick={() => setSettingsOpen(true)}
-                className="absolute bottom-3 right-3 z-30 w-9 h-9 rounded-full bg-black/70 hover:bg-black/90 flex items-center justify-center text-white/80 hover:text-white transition-all active:scale-90"
-                aria-label="Player settings"
-                data-ocid="player.settings.open_modal_button"
+              <div className="w-10 h-1 rounded-full bg-white/25" />
+            </motion.div>
+
+            {/* Close */}
+            <button
+              type="button"
+              onClick={onClose}
+              className="absolute right-3 top-3 z-50 w-8 h-8 rounded-full bg-black/60 flex items-center justify-center text-white/80 hover:text-white hover:bg-black/80 transition-colors"
+              aria-label="Close"
+              data-ocid="home.video.close_button"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            {/* Scrollable body */}
+            <div
+              ref={scrollRef}
+              className="max-h-[92vh] overflow-y-auto scrollbar-hide"
+            >
+              {/* ── 1. VIDEO PLAYER (full width) ──────────────────────── */}
+              <div
+                ref={videoWrapRef}
+                className="relative bg-black w-full aspect-video"
               >
-                <Settings className="w-4 h-4" />
-              </button>
-              {/* End screen */}
-              <AnimatePresence>
-                {showEndScreen && (
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="absolute inset-0 z-30 bg-black/80 flex flex-col items-center justify-center gap-4 px-6"
-                    data-ocid="player.end_screen.panel"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setShowEndScreen(false)}
-                      className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/70"
-                      data-ocid="player.end_screen.close_button"
+                {/* biome-ignore lint/a11y/useMediaCaption: user-generated content; custom subtitle overlay */}
+                <video
+                  ref={videoRef}
+                  src={post.videoBlob.getDirectURL()}
+                  controls
+                  autoPlay
+                  playsInline
+                  className="w-full h-full object-contain"
+                  onTimeUpdate={handleTimeUpdate}
+                  onEnded={() => setShowEndScreen(true)}
+                />
+                <SubtitleOverlay
+                  lang={subtitle}
+                  translating={translating}
+                  lines={subtitleLines}
+                />
+                {/* Subscribe overlay — appears at 3s */}
+                <AnimatePresence>
+                  {showSubscribeOverlay && !isFollowing && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 8 }}
+                      transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                      className="absolute bottom-14 left-0 right-0 flex justify-center z-20 pointer-events-none px-4"
                     >
-                      <X className="w-4 h-4" />
-                    </button>
-                    <p className="text-white/50 text-xs font-semibold uppercase tracking-widest">
-                      Up Next
-                    </p>
-                    {suggested[0] && (
+                      <div className="flex items-center gap-2.5 bg-black/75 backdrop-blur-sm border border-white/10 rounded-2xl px-4 py-2.5 pointer-events-auto">
+                        <div className="w-7 h-7 rounded-full bg-[#FF2D2D]/20 border border-[#FF2D2D]/40 flex items-center justify-center shrink-0">
+                          <Bell className="w-3.5 h-3.5 text-[#FF2D2D]" />
+                        </div>
+                        <span className="text-white text-xs font-semibold">
+                          Subscribe to{" "}
+                          <span className="text-[#FF2D2D]">@SUB PREMIUM</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleSubscribe();
+                            setShowSubscribeOverlay(false);
+                          }}
+                          className="ml-1 px-3 py-1 bg-[#FF2D2D] hover:bg-[#FF2D2D]/90 text-white text-xs font-bold rounded-full transition-colors active:scale-95"
+                          data-ocid="player.subscribe_overlay.button"
+                        >
+                          Subscribe
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowSubscribeOverlay(false)}
+                          className="w-5 h-5 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/60 transition-colors"
+                          data-ocid="player.subscribe_overlay.close_button"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                {/* Settings gear */}
+                <button
+                  type="button"
+                  onClick={() => setSettingsOpen(true)}
+                  className="absolute bottom-3 right-3 z-30 w-9 h-9 rounded-full bg-black/70 hover:bg-black/90 flex items-center justify-center text-white/80 hover:text-white transition-all active:scale-90"
+                  aria-label="Player settings"
+                  data-ocid="player.settings.open_modal_button"
+                >
+                  <Settings className="w-4 h-4" />
+                </button>
+                {/* End screen */}
+                <AnimatePresence>
+                  {showEndScreen && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="absolute inset-0 z-30 bg-black/80 flex flex-col items-center justify-center gap-4 px-6"
+                      data-ocid="player.end_screen.panel"
+                    >
                       <button
                         type="button"
                         onClick={() => setShowEndScreen(false)}
-                        className="flex flex-col items-center gap-2 bg-white/10 hover:bg-white/20 rounded-2xl p-4 w-48 transition-colors active:scale-95"
-                        data-ocid="player.end_screen.next_button"
+                        className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/70"
+                        data-ocid="player.end_screen.close_button"
                       >
-                        <div className="w-28 h-16 rounded-xl overflow-hidden bg-secondary">
-                          <img
-                            src={suggested[0].thumbnailBlob.getDirectURL()}
-                            alt={suggested[0].title}
-                            className="w-full h-full object-cover"
-                            onError={(e) => {
-                              (
-                                e.currentTarget as HTMLImageElement
-                              ).style.display = "none";
-                            }}
-                          />
-                        </div>
-                        <span className="text-white/90 text-xs font-semibold text-center line-clamp-2">
-                          {suggested[0].title}
-                        </span>
+                        <X className="w-4 h-4" />
                       </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowEndScreen(false);
-                        void handleSubscribe();
-                      }}
-                      className="flex items-center gap-2 bg-[#FF2D2D] hover:bg-[#FF2D2D]/90 text-white rounded-full px-5 py-2.5 font-bold text-sm transition-colors active:scale-95"
-                      data-ocid="player.end_screen.subscribe_button"
-                    >
-                      <Bell className="w-4 h-4" />
-                      Subscribe to @{creatorName}
-                    </button>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-
-            {/* ── 2. TITLE & META ──────────────────────────────────── */}
-            <div className="px-4 pt-3 pb-1">
-              <DialogHeader>
-                <DialogTitle className="text-base font-bold leading-snug text-foreground text-left">
-                  {post.title}
-                </DialogTitle>
-              </DialogHeader>
-              <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
-                <span>{fmtN(views)} views</span>
-                <span>·</span>
-                <span>{fmtTime(post.timestamp)}</span>
+                      <p className="text-white/50 text-xs font-semibold uppercase tracking-widest">
+                        Up Next
+                      </p>
+                      {suggested[0] && (
+                        <button
+                          type="button"
+                          onClick={() => setShowEndScreen(false)}
+                          className="flex flex-col items-center gap-2 bg-white/10 hover:bg-white/20 rounded-2xl p-4 w-48 transition-colors active:scale-95"
+                          data-ocid="player.end_screen.next_button"
+                        >
+                          <div className="w-28 h-16 rounded-xl overflow-hidden bg-secondary">
+                            <img
+                              src={suggested[0].thumbnailBlob.getDirectURL()}
+                              alt={suggested[0].title}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                (
+                                  e.currentTarget as HTMLImageElement
+                                ).style.display = "none";
+                              }}
+                            />
+                          </div>
+                          <span className="text-white/90 text-xs font-semibold text-center line-clamp-2">
+                            {suggested[0].title}
+                          </span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowEndScreen(false);
+                          void handleSubscribe();
+                        }}
+                        className="flex items-center gap-2 bg-[#FF2D2D] hover:bg-[#FF2D2D]/90 text-white rounded-full px-5 py-2.5 font-bold text-sm transition-colors active:scale-95"
+                        data-ocid="player.end_screen.subscribe_button"
+                      >
+                        <Bell className="w-4 h-4" />
+                        Subscribe to @{creatorName}
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
-            </div>
 
-            {/* ── 3. ACTIONS ROW ───────────────────────────────────── */}
-            <div
-              className="px-3 py-2 flex items-center gap-2 overflow-x-auto scrollbar-hide"
-              data-ocid="player.actions.panel"
-            >
-              {/* Like / Dislike pill */}
-              <div className="flex items-center bg-secondary/60 rounded-full shrink-0">
-                <button
-                  type="button"
-                  onClick={handleLike}
-                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-l-full text-sm font-semibold transition-colors ${liked ? "text-primary bg-primary/10" : "text-foreground hover:bg-secondary"}`}
-                  data-ocid="player.like.button"
-                >
-                  <ThumbsUp className="w-4 h-4" />
-                  <span>{fmtN(likeCount)}</span>
-                </button>
-                <div className="w-px h-4 bg-border/40" />
-                <button
-                  type="button"
-                  onClick={handleDislike}
-                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-r-full text-sm font-semibold transition-colors ${disliked ? "text-red-400 bg-red-500/10" : "text-foreground hover:bg-secondary"}`}
-                  data-ocid="player.dislike.button"
-                >
-                  <ThumbsDown className="w-4 h-4" />
-                </button>
-              </div>
-              {/* Comments count */}
-              <button
-                type="button"
-                onClick={() => {
-                  const el = scrollRef.current;
-                  if (el) el.scrollBy({ top: 400, behavior: "smooth" });
-                }}
-                className="flex items-center gap-1.5 bg-secondary/60 hover:bg-secondary px-3.5 py-2 rounded-full text-sm font-semibold text-foreground transition-colors shrink-0"
-                data-ocid="player.comments.button"
-              >
-                <MessageCircle className="w-4 h-4" />
-                {comments.length > 0 ? fmtN(comments.length) : "Comment"}
-              </button>
-              {/* Share */}
-              <button
-                type="button"
-                onClick={() => setShareOpen(true)}
-                className="flex items-center gap-1.5 bg-secondary/60 hover:bg-secondary px-3.5 py-2 rounded-full text-sm font-semibold text-foreground transition-colors shrink-0"
-                data-ocid="player.share.button"
-              >
-                <Share2 className="w-4 h-4" />
-                Share
-              </button>
-              {/* Remix */}
-              <button
-                type="button"
-                onClick={() => toast.info("Remix coming soon!")}
-                className="flex items-center gap-1.5 bg-secondary/60 hover:bg-secondary px-3.5 py-2 rounded-full text-sm font-semibold text-foreground transition-colors shrink-0"
-                data-ocid="player.remix.button"
-              >
-                <Shuffle className="w-4 h-4" />
-                Remix
-              </button>
-              {/* Save */}
-              <button
-                type="button"
-                onClick={() => setPlaylistOpen(true)}
-                className="flex items-center gap-1.5 bg-secondary/60 hover:bg-secondary px-3.5 py-2 rounded-full text-sm font-semibold text-foreground transition-colors shrink-0"
-                data-ocid="player.save_playlist.button"
-              >
-                <BookmarkPlus className="w-4 h-4" />
-                Save
-              </button>
-              {/* Download */}
-              <button
-                type="button"
-                onClick={() =>
-                  toast.info("Download available for premium subscribers")
-                }
-                className="flex items-center gap-1.5 bg-secondary/60 hover:bg-secondary px-3.5 py-2 rounded-full text-sm font-semibold text-foreground transition-colors shrink-0"
-                data-ocid="player.download.button"
-              >
-                <Download className="w-4 h-4" />
-                Download
-              </button>
-              {/* More */}
-              <button
-                type="button"
-                onClick={() => toast.info("More options coming soon")}
-                className="flex items-center justify-center bg-secondary/60 hover:bg-secondary w-9 h-9 rounded-full text-foreground transition-colors shrink-0"
-                data-ocid="player.more.button"
-              >
-                <MoreHorizontal className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="h-px bg-border/15 mx-4" />
-
-            {/* ── 4. CREATOR SECTION ───────────────────────────────── */}
-            <div
-              className="px-4 py-3 flex items-center gap-3"
-              data-ocid="player.creator.panel"
-            >
-              <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center shrink-0 font-bold text-sm text-primary">
-                {creatorName.slice(0, 2).toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <p className="text-sm font-bold truncate">@{creatorName}</p>
-                  <OnlineStatusDot lastActiveAt={creatorLastActive} size="sm" />
+              {/* ── 2. TITLE & META ──────────────────────────────────── */}
+              <div className="px-4 pt-3 pb-1">
+                <DialogHeader>
+                  <DialogTitle className="text-base font-bold leading-snug text-foreground text-left">
+                    {post.title}
+                  </DialogTitle>
+                </DialogHeader>
+                <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+                  <span>{fmtN(views)} views</span>
+                  <span>·</span>
+                  <span>{fmtTime(post.timestamp)}</span>
                 </div>
-                <p className="text-xs text-muted-foreground">Creator</p>
               </div>
-              <button
-                type="button"
-                onClick={() => void handleSubscribe()}
-                className={`shrink-0 px-4 py-1.5 rounded-full text-sm font-bold transition-colors ${isFollowing ? "bg-secondary text-foreground hover:bg-secondary/80" : "bg-[#FF2D2D] hover:bg-[#FF2D2D]/90 text-white"}`}
-                data-ocid="player.subscribe.button"
+
+              {/* ── 3. ACTIONS ROW ───────────────────────────────────── */}
+              <div
+                className="px-3 py-2 flex items-center gap-2 overflow-x-auto scrollbar-hide"
+                data-ocid="player.actions.panel"
               >
-                {isFollowing ? "Subscribed" : "Subscribe"}
-              </button>
-            </div>
-
-            <div className="h-px bg-border/15 mx-4" />
-
-            {/* ── 5. DESCRIPTION ───────────────────────────────────── */}
-            {post.description && (
-              <div className="px-4 py-3" data-ocid="player.description.panel">
-                <p
-                  className={`text-sm text-muted-foreground leading-relaxed ${descExpanded ? "" : "line-clamp-2"}`}
-                >
-                  {post.description}
-                </p>
-                {post.description.length > 100 && (
+                {/* Like / Dislike pill */}
+                <div className="flex items-center bg-secondary/60 rounded-full shrink-0">
                   <button
                     type="button"
-                    onClick={() => setDescExpanded((p) => !p)}
-                    className="text-xs font-semibold text-foreground mt-1.5 hover:text-primary transition-colors"
-                    data-ocid="player.description.toggle"
+                    onClick={handleLike}
+                    className={`flex items-center gap-1.5 px-3.5 py-2 rounded-l-full text-sm font-semibold transition-colors ${liked ? "text-primary bg-primary/10" : "text-foreground hover:bg-secondary"}`}
+                    data-ocid="player.like.button"
                   >
-                    {descExpanded ? "Show less" : "Show more"}
+                    <ThumbsUp className="w-4 h-4" />
+                    <span>{fmtN(likeCount)}</span>
                   </button>
-                )}
-              </div>
-            )}
-
-            {/* Translated title panel */}
-            {lang !== "en" && subtitle !== "off" && (
-              <div
-                className="mx-4 mb-3 px-4 py-3 bg-primary/5 border border-primary/15 rounded-2xl"
-                data-ocid="player.translated_title.panel"
-              >
-                <div className="flex items-center gap-1.5 mb-1.5">
-                  <Languages className="w-3.5 h-3.5 text-primary" />
-                  <span className="text-[10px] font-bold text-primary uppercase tracking-wide">
-                    {getLangName(lang)} Translation
-                  </span>
-                </div>
-                <p className="text-sm font-semibold leading-snug">
-                  [{getLangName(lang)}] {post.title}
-                </p>
-              </div>
-            )}
-
-            <div className="h-px bg-border/15 mx-4" />
-
-            {/* ── 6. COMMENTS ──────────────────────────────────────── */}
-            <div className="px-4 pt-4 pb-3" data-ocid="player.comments.panel">
-              {/* Header */}
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <MessageCircle className="w-4 h-4 text-primary" />
-                  <span className="text-sm font-bold">Comments</span>
-                  <Badge
-                    variant="secondary"
-                    className="text-xs bg-secondary/60 text-muted-foreground rounded-full"
+                  <div className="w-px h-4 bg-border/40" />
+                  <button
+                    type="button"
+                    onClick={handleDislike}
+                    className={`flex items-center gap-1.5 px-3.5 py-2 rounded-r-full text-sm font-semibold transition-colors ${disliked ? "text-red-400 bg-red-500/10" : "text-foreground hover:bg-secondary"}`}
+                    data-ocid="player.dislike.button"
                   >
-                    {comments.length}
-                  </Badge>
+                    <ThumbsDown className="w-4 h-4" />
+                  </button>
                 </div>
-                {/* Sort toggle */}
-                <div className="flex items-center gap-0.5 bg-secondary/40 rounded-full p-1">
-                  {(["newest", "top"] as const).map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => setCommentSort(s)}
-                      className={`px-2.5 py-0.5 rounded-full text-xs font-semibold transition-colors ${commentSort === s ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"}`}
-                      data-ocid={`player.comments.sort_${s}.tab`}
-                    >
-                      {s === "newest" ? "Newest" : "Top"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Add comment */}
-              <div className="flex gap-2 mb-4">
-                <Input
-                  value={newComment}
-                  onChange={(e) => setNewComment(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) addComment();
-                  }}
-                  placeholder="Add a comment…"
-                  className="flex-1 h-10 bg-secondary/40 border-border/30 text-sm rounded-2xl"
-                  data-ocid="comments.add.input"
-                />
+                {/* Comments count */}
                 <button
                   type="button"
-                  onClick={addComment}
-                  disabled={!newComment.trim()}
-                  className="h-10 w-10 rounded-2xl bg-primary/20 hover:bg-primary/30 text-primary flex items-center justify-center transition-colors disabled:opacity-40 shrink-0"
-                  data-ocid="comments.add.submit_button"
+                  onClick={() => {
+                    const el = scrollRef.current;
+                    if (el) el.scrollBy({ top: 400, behavior: "smooth" });
+                  }}
+                  className="flex items-center gap-1.5 bg-secondary/60 hover:bg-secondary px-3.5 py-2 rounded-full text-sm font-semibold text-foreground transition-colors shrink-0"
+                  data-ocid="player.comments.button"
                 >
-                  <Send className="w-4 h-4" />
+                  <MessageCircle className="w-4 h-4" />
+                  {comments.length > 0 ? fmtN(comments.length) : "Comment"}
+                </button>
+                {/* Share */}
+                <button
+                  type="button"
+                  onClick={() => setShareOpen(true)}
+                  className="flex items-center gap-1.5 bg-secondary/60 hover:bg-secondary px-3.5 py-2 rounded-full text-sm font-semibold text-foreground transition-colors shrink-0"
+                  data-ocid="player.share.button"
+                >
+                  <Share2 className="w-4 h-4" />
+                  Share
+                </button>
+                {/* Remix */}
+                <button
+                  type="button"
+                  onClick={() => toast.info("Remix coming soon!")}
+                  className="flex items-center gap-1.5 bg-secondary/60 hover:bg-secondary px-3.5 py-2 rounded-full text-sm font-semibold text-foreground transition-colors shrink-0"
+                  data-ocid="player.remix.button"
+                >
+                  <Shuffle className="w-4 h-4" />
+                  Remix
+                </button>
+                {/* Save */}
+                <button
+                  type="button"
+                  onClick={() => setPlaylistOpen(true)}
+                  className="flex items-center gap-1.5 bg-secondary/60 hover:bg-secondary px-3.5 py-2 rounded-full text-sm font-semibold text-foreground transition-colors shrink-0"
+                  data-ocid="player.save_playlist.button"
+                >
+                  <BookmarkPlus className="w-4 h-4" />
+                  Save
+                </button>
+                {/* Download */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    toast.info("Download available for premium subscribers")
+                  }
+                  className="flex items-center gap-1.5 bg-secondary/60 hover:bg-secondary px-3.5 py-2 rounded-full text-sm font-semibold text-foreground transition-colors shrink-0"
+                  data-ocid="player.download.button"
+                >
+                  <Download className="w-4 h-4" />
+                  Download
+                </button>
+                {/* More */}
+                <button
+                  type="button"
+                  onClick={() => toast.info("More options coming soon")}
+                  className="flex items-center justify-center bg-secondary/60 hover:bg-secondary w-9 h-9 rounded-full text-foreground transition-colors shrink-0"
+                  data-ocid="player.more.button"
+                >
+                  <MoreHorizontal className="w-4 h-4" />
                 </button>
               </div>
 
-              {/* List */}
-              {sortedComments.length === 0 ? (
-                <div
-                  className="text-center py-8 text-muted-foreground text-sm"
-                  data-ocid="comments.list.empty_state"
-                >
-                  <MessageCircle className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                  No comments yet. Be the first!
+              <div className="h-px bg-border/15 mx-4" />
+
+              {/* ── 4. CREATOR SECTION ───────────────────────────────── */}
+              <div
+                className="px-4 py-3 flex items-center gap-3"
+                data-ocid="player.creator.panel"
+              >
+                <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center shrink-0 font-bold text-sm text-primary">
+                  {creatorName.slice(0, 2).toUpperCase()}
                 </div>
-              ) : (
-                <div className="space-y-5" data-ocid="comments.list">
-                  {sortedComments.map((c, i) => (
-                    <div key={c.id} data-ocid={`comments.item.${i + 1}`}>
-                      <CommentItem
-                        comment={c}
-                        videoTitle={post.title}
-                        creatorName={creatorName}
-                        currentUser={currentUser}
-                        onReplyPosted={onReply}
-                        onDeleteComment={onDelete}
-                        onTogglePin={onPin}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-sm font-bold truncate">@{creatorName}</p>
+                    <OnlineStatusDot
+                      lastActiveAt={creatorLastActive}
+                      size="sm"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">Creator</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleSubscribe()}
+                  className={`shrink-0 px-4 py-1.5 rounded-full text-sm font-bold transition-colors ${isFollowing ? "bg-secondary text-foreground hover:bg-secondary/80" : "bg-[#FF2D2D] hover:bg-[#FF2D2D]/90 text-white"}`}
+                  data-ocid="player.subscribe.button"
+                >
+                  {isFollowing ? "Subscribed" : "Subscribe"}
+                </button>
+              </div>
+
+              <div className="h-px bg-border/15 mx-4" />
+
+              {/* ── 5. DESCRIPTION ───────────────────────────────────── */}
+              {post.description && (
+                <div className="px-4 py-3" data-ocid="player.description.panel">
+                  <p
+                    className={`text-sm text-muted-foreground leading-relaxed ${descExpanded ? "" : "line-clamp-2"}`}
+                  >
+                    {post.description}
+                  </p>
+                  {post.description.length > 100 && (
+                    <button
+                      type="button"
+                      onClick={() => setDescExpanded((p) => !p)}
+                      className="text-xs font-semibold text-foreground mt-1.5 hover:text-primary transition-colors"
+                      data-ocid="player.description.toggle"
+                    >
+                      {descExpanded ? "Show less" : "Show more"}
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Translated title panel */}
+              {lang !== "en" && subtitle !== "off" && (
+                <div
+                  className="mx-4 mb-3 px-4 py-3 bg-primary/5 border border-primary/15 rounded-2xl"
+                  data-ocid="player.translated_title.panel"
+                >
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <Languages className="w-3.5 h-3.5 text-primary" />
+                    <span className="text-[10px] font-bold text-primary uppercase tracking-wide">
+                      {getLangName(lang)} Translation
+                    </span>
+                  </div>
+                  <p className="text-sm font-semibold leading-snug">
+                    [{getLangName(lang)}] {post.title}
+                  </p>
+                </div>
+              )}
+
+              <div className="h-px bg-border/15 mx-4" />
+
+              {/* ── 6. COMMENTS ──────────────────────────────────────── */}
+              <div className="px-4 pt-4 pb-3" data-ocid="player.comments.panel">
+                {/* Header */}
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <MessageCircle className="w-4 h-4 text-primary" />
+                    <span className="text-sm font-bold">Comments</span>
+                    <Badge
+                      variant="secondary"
+                      className="text-xs bg-secondary/60 text-muted-foreground rounded-full"
+                    >
+                      {comments.length}
+                    </Badge>
+                  </div>
+                  {/* Sort toggle */}
+                  <div className="flex items-center gap-0.5 bg-secondary/40 rounded-full p-1">
+                    {(["newest", "top"] as const).map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setCommentSort(s)}
+                        className={`px-2.5 py-0.5 rounded-full text-xs font-semibold transition-colors ${commentSort === s ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"}`}
+                        data-ocid={`player.comments.sort_${s}.tab`}
+                      >
+                        {s === "newest" ? "Newest" : "Top"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Add comment */}
+                <div className="flex gap-2 mb-4">
+                  <Input
+                    value={newComment}
+                    onChange={(e) => setNewComment(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) addComment();
+                    }}
+                    placeholder="Add a comment…"
+                    className="flex-1 h-10 bg-secondary/40 border-border/30 text-sm rounded-2xl"
+                    data-ocid="comments.add.input"
+                  />
+                  <button
+                    type="button"
+                    onClick={addComment}
+                    disabled={!newComment.trim()}
+                    className="h-10 w-10 rounded-2xl bg-primary/20 hover:bg-primary/30 text-primary flex items-center justify-center transition-colors disabled:opacity-40 shrink-0"
+                    data-ocid="comments.add.submit_button"
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* List */}
+                {sortedComments.length === 0 ? (
+                  <div
+                    className="text-center py-8 text-muted-foreground text-sm"
+                    data-ocid="comments.list.empty_state"
+                  >
+                    <MessageCircle className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                    No comments yet. Be the first!
+                  </div>
+                ) : (
+                  <div className="space-y-5" data-ocid="comments.list">
+                    {sortedComments.map((c, i) => (
+                      <div key={c.id} data-ocid={`comments.item.${i + 1}`}>
+                        <CommentItem
+                          comment={c}
+                          videoTitle={post.title}
+                          creatorName={creatorName}
+                          currentUser={currentUser}
+                          onReplyPosted={onReply}
+                          onDeleteComment={onDelete}
+                          onTogglePin={onPin}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* ── 7. SUGGESTED VIDEOS ──────────────────────────────── */}
+              {suggested.length > 0 && (
+                <div
+                  className="px-4 pt-2 pb-6"
+                  data-ocid="player.suggested.panel"
+                >
+                  <div className="h-px bg-border/15 mb-3" />
+                  <p className="text-sm font-bold mb-2">Up Next</p>
+                  <div className="space-y-1">
+                    {suggested.map((v) => (
+                      <SuggestedCard
+                        key={v.id.toString()}
+                        post={v}
+                        onClick={() => {
+                          onClose();
+                        }}
                       />
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
-
-            {/* ── 7. SUGGESTED VIDEOS ──────────────────────────────── */}
-            {suggested.length > 0 && (
-              <div
-                className="px-4 pt-2 pb-6"
-                data-ocid="player.suggested.panel"
-              >
-                <div className="h-px bg-border/15 mb-3" />
-                <p className="text-sm font-bold mb-2">Up Next</p>
-                <div className="space-y-1">
-                  {suggested.map((v) => (
-                    <SuggestedCard
-                      key={v.id.toString()}
-                      post={v}
-                      onClick={() => {
-                        onClose();
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+          </motion.div>
+          {/* end animated wrapper */}
         </DialogContent>
       </Dialog>
 

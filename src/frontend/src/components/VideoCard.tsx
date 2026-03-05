@@ -118,7 +118,7 @@ export function VideoCard({
               className="font-medium truncate max-w-[60%] text-primary hover:text-primary/80 transition-colors underline-offset-2 hover:underline text-left"
               data-ocid="home.creator.button"
             >
-              @{username ?? "anonymous"}
+              @{username ?? "user"}
             </button>
             <span className="flex items-center gap-1 shrink-0">
               <Clock className="w-3 h-3" />

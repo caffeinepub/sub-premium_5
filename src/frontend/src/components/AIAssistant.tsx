@@ -257,8 +257,10 @@ export function AIAssistant() {
             transition={{ type: "spring", stiffness: 400, damping: 28 }}
             whileTap={{ scale: 0.92 }}
             onClick={() => setIsOpen(true)}
-            className="fixed bottom-24 right-4 z-50 w-14 h-14 rounded-full flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF2D2D]/50"
+            className="fixed z-50 w-14 h-14 rounded-full flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF2D2D]/50"
             style={{
+              right: 16,
+              top: 120,
               background: "linear-gradient(135deg, #FF2D2D 0%, #cc1a1a 100%)",
               boxShadow:
                 "0 0 20px rgba(255,45,45,0.5), 0 4px 16px rgba(0,0,0,0.4)",
