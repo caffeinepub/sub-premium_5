@@ -14,7 +14,7 @@ interface BottomNavProps {
   onTabChange: (tab: TabId) => void;
 }
 
-const regularTabs = [
+const leftTabs = [
   { id: "home" as const, label: "Home", icon: Home, ocid: "nav.home.link" },
   {
     id: "shorts" as const,
@@ -22,43 +22,35 @@ const regularTabs = [
     icon: Zap,
     ocid: "nav.shorts.link",
   },
+  {
+    id: "upload" as const,
+    label: "Upload",
+    icon: Upload,
+    ocid: "nav.upload.link",
+  },
 ] as const;
 
 const rightTabs = [
-  {
-    id: "live" as const,
-    label: "Live",
-    icon: Radio,
-    ocid: "nav.live.link",
-    hasLiveBadge: true,
-  },
   {
     id: "history" as const,
     label: "History",
     icon: Clock,
     ocid: "nav.history.link",
-    hasLiveBadge: false,
   },
   {
     id: "profile" as const,
     label: "Profile",
     icon: User,
     ocid: "nav.profile.link",
-    hasLiveBadge: false,
   },
 ] as const;
 
 export function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
-  const handleUploadClick = () => {
-    onTabChange("upload");
-  };
-
   const renderTab = (
     id: TabId,
     label: string,
     Icon: React.ElementType,
     ocid: string,
-    hasLiveBadge?: boolean,
   ) => {
     const isActive = activeTab === id;
     return (
@@ -89,12 +81,6 @@ export function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
             className={`w-4 h-4 transition-colors duration-200 ${isActive ? "text-[#FF2D2D]" : "text-gray-500"}`}
             strokeWidth={isActive ? 2.5 : 2}
           />
-          {hasLiveBadge && (
-            <span
-              className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full"
-              style={{ background: "#FF2D2D" }}
-            />
-          )}
         </motion.div>
         <motion.span
           animate={{ color: isActive ? "#FF2D2D" : "#6b7280" }}
@@ -106,6 +92,8 @@ export function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
       </button>
     );
   };
+
+  const isLiveActive = activeTab === "live";
 
   return (
     <nav
@@ -125,47 +113,94 @@ export function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
         paddingBottom: "env(safe-area-inset-bottom)",
       }}
     >
-      <div className="flex items-stretch" style={{ minHeight: 70 }}>
-        {/* Left tabs */}
-        {regularTabs.map(({ id, label, icon: Icon, ocid }) =>
-          renderTab(id, label, Icon, ocid, false),
-        )}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          minHeight: 70,
+        }}
+      >
+        {/* Left group: Home, Shorts, Upload */}
+        <div className="flex flex-1 items-stretch">
+          {leftTabs.map(({ id, label, icon: Icon, ocid }) =>
+            renderTab(id, label, Icon, ocid),
+          )}
+        </div>
 
-        {/* Center Upload button */}
+        {/* Center: Go Live button — true flex center item */}
         <div
-          className="relative flex-1 flex items-center justify-center"
-          style={{ position: "relative", zIndex: 10 }}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+            padding: "0 4px",
+          }}
         >
           <motion.button
             type="button"
-            onClick={handleUploadClick}
-            data-ocid="nav.upload.link"
-            aria-label="Upload"
+            onClick={() => onTabChange("live")}
+            data-ocid="nav.live.link"
+            aria-label="Go Live"
+            aria-current={isLiveActive ? "page" : undefined}
             whileTap={{ scale: 0.95 }}
-            className="flex items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF2D2D]/50"
+            className="flex flex-col items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF2E2E]/60"
             style={{
-              width: 56,
-              height: 56,
-              minWidth: 48,
-              minHeight: 48,
-              background: "#FF2D2D",
-              boxShadow:
-                "0 0 18px rgba(255,45,45,0.6), 0 4px 12px rgba(0,0,0,0.4)",
               position: "relative",
-              bottom: 10,
+              width: 64,
+              height: 64,
+              borderRadius: "50%",
+              backgroundColor: "#FF2E2E",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              transform: "translateY(-20px)",
+              boxShadow: isLiveActive
+                ? "0 6px 20px rgba(255, 46, 46, 0.7), 0 0 0 3px rgba(255,46,46,0.25)"
+                : "0 6px 20px rgba(255, 46, 46, 0.4)",
               cursor: "pointer",
               pointerEvents: "auto",
               zIndex: 10,
+              flexShrink: 0,
+              transition: "box-shadow 0.2s ease",
             }}
           >
-            <Upload className="w-6 h-6 text-white" strokeWidth={2.5} />
+            <Radio className="w-6 h-6 text-white" strokeWidth={2.5} />
+            <span
+              style={{
+                fontSize: 8,
+                fontWeight: 700,
+                color: "white",
+                letterSpacing: "0.05em",
+                marginTop: 2,
+                lineHeight: 1,
+              }}
+            >
+              LIVE
+            </span>
+            {/* Live indicator dot */}
+            <span
+              style={{
+                position: "absolute",
+                top: 6,
+                right: 6,
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                backgroundColor: "white",
+                opacity: 0.9,
+              }}
+            />
           </motion.button>
         </div>
 
-        {/* Right tabs */}
-        {rightTabs.map(({ id, label, icon: Icon, ocid, hasLiveBadge }) =>
-          renderTab(id, label, Icon, ocid, hasLiveBadge),
-        )}
+        {/* Right group: History, Profile */}
+        <div className="flex flex-1 items-stretch justify-end">
+          {rightTabs.map(({ id, label, icon: Icon, ocid }) =>
+            renderTab(id, label, Icon, ocid),
+          )}
+        </div>
       </div>
     </nav>
   );
