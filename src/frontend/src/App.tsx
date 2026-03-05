@@ -460,11 +460,9 @@ function AppInner() {
             <BottomNav activeTab={activeTab} onTabChange={navigateToTab} />
           )}
 
-          {/* Floating AI Assistant — hidden in full-screen sub-routes, on profile tab,
-              and when the actor is not yet available (fail silently, no error shown) */}
-          {!isFullScreenRoute && activeTab !== "profile" && !!actor && (
-            <AIAssistant />
-          )}
+          {/* Floating AI Assistant — hidden in full-screen sub-routes only.
+              Visible on all tabs including profile. Fails silently if actor not ready. */}
+          {!isFullScreenRoute && !!actor && <AIAssistant />}
         </div>
       </div>
 

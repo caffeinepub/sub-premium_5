@@ -365,43 +365,62 @@ function SubtitleOverlay({
 
 // ─── PlayerSettingsModal ───────────────────────────────────────────────────────
 
+interface TempSettings {
+  quality: QualityOption;
+  speed: SpeedOption;
+  subtitle: SubtitleLang;
+  audio: AudioOption;
+}
+
 function PlayerSettingsModal({
   open,
   onClose,
   quality,
-  onQuality,
   speed,
-  onSpeed,
   subtitle,
-  onSubtitle,
   audio,
-  onAudio,
   translating,
+  onSave,
 }: {
   open: boolean;
   onClose: () => void;
   quality: QualityOption;
-  onQuality: (q: QualityOption) => void;
   speed: SpeedOption;
-  onSpeed: (s: SpeedOption) => void;
   subtitle: SubtitleLang;
-  onSubtitle: (s: SubtitleLang) => void;
   audio: AudioOption;
-  onAudio: (a: AudioOption) => void;
   translating: boolean;
+  onSave: (settings: TempSettings) => void;
 }) {
   const [active, setActive] = useState<SettingsSection>(null);
+
+  // Temporary state — initialised from active settings when modal opens.
+  // Changes here do NOT affect the video until Save is tapped.
+  const [temp, setTemp] = useState<TempSettings>({
+    quality,
+    speed,
+    subtitle,
+    audio,
+  });
+
+  // Sync temp state from parent every time the modal opens (or active settings change while closed).
+  useEffect(() => {
+    if (open) {
+      setTemp({ quality, speed, subtitle, audio });
+      setActive(null);
+    }
+  }, [open, quality, speed, subtitle, audio]);
+
   const subs = {
-    quality: quality,
-    speed: speed === 1 ? "Normal" : `${speed}×`,
+    quality: temp.quality,
+    speed: temp.speed === 1 ? "Normal" : `${temp.speed}×`,
     subtitles:
-      subtitle === "off"
+      temp.subtitle === "off"
         ? "OFF"
-        : subtitle === "auto"
+        : temp.subtitle === "auto"
           ? "Auto"
-          : (SUBTITLE_OPTIONS.find((s) => s.value === subtitle)?.label ??
-            subtitle),
-    audio: audio === "original" ? "Original" : "Dubbed",
+          : (SUBTITLE_OPTIONS.find((s) => s.value === temp.subtitle)?.label ??
+            temp.subtitle),
+    audio: temp.audio === "original" ? "Original" : "Dubbed",
   };
   const icons = {
     quality: <MonitorPlay className="w-4 h-4" />,
@@ -419,6 +438,16 @@ function PlayerSettingsModal({
     ["quality", "speed", "subtitles", "audio"] as SettingsSection[]
   ).filter(Boolean) as NonNullable<SettingsSection>[];
 
+  const handleCancel = () => {
+    // Discard temp changes — just close, parent state is untouched.
+    onClose();
+  };
+
+  const handleSave = () => {
+    onSave(temp);
+    onClose();
+  };
+
   return (
     <AnimatePresence>
       {open && (
@@ -429,7 +458,7 @@ function PlayerSettingsModal({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[60] bg-black/50"
-            onClick={onClose}
+            onClick={handleCancel}
           />
           <motion.div
             key="m"
@@ -447,7 +476,7 @@ function PlayerSettingsModal({
                 </span>
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={handleCancel}
                   className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/70 transition-colors"
                   data-ocid="player.settings.close_button"
                 >
@@ -455,7 +484,7 @@ function PlayerSettingsModal({
                 </button>
               </div>
               <div className="h-px bg-white/10 mx-5" />
-              <div className="py-3 pb-8">
+              <div className="py-3">
                 {sections.map((k) => (
                   <div key={k}>
                     <button
@@ -493,18 +522,18 @@ function PlayerSettingsModal({
                                   key={q}
                                   type="button"
                                   onClick={() => {
-                                    onQuality(q);
+                                    setTemp((p) => ({ ...p, quality: q }));
                                     setActive(null);
                                   }}
                                   className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors"
                                 >
-                                  {quality === q ? (
+                                  {temp.quality === q ? (
                                     <Check className="w-4 h-4 text-[#FF2D2D] shrink-0" />
                                   ) : (
                                     <span className="w-4 h-4 shrink-0" />
                                   )}
                                   <span
-                                    className={`text-sm ${quality === q ? "text-[#FF2D2D] font-semibold" : "text-white/70"}`}
+                                    className={`text-sm ${temp.quality === q ? "text-[#FF2D2D] font-semibold" : "text-white/70"}`}
                                   >
                                     {q}
                                   </span>
@@ -516,18 +545,18 @@ function PlayerSettingsModal({
                                   key={value}
                                   type="button"
                                   onClick={() => {
-                                    onSpeed(value);
+                                    setTemp((p) => ({ ...p, speed: value }));
                                     setActive(null);
                                   }}
                                   className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors"
                                 >
-                                  {speed === value ? (
+                                  {temp.speed === value ? (
                                     <Check className="w-4 h-4 text-[#FF2D2D] shrink-0" />
                                   ) : (
                                     <span className="w-4 h-4 shrink-0" />
                                   )}
                                   <span
-                                    className={`text-sm ${speed === value ? "text-[#FF2D2D] font-semibold" : "text-white/70"}`}
+                                    className={`text-sm ${temp.speed === value ? "text-[#FF2D2D] font-semibold" : "text-white/70"}`}
                                   >
                                     {label}
                                   </span>
@@ -539,18 +568,21 @@ function PlayerSettingsModal({
                                   key={o.value}
                                   type="button"
                                   onClick={() => {
-                                    onSubtitle(o.value);
+                                    setTemp((p) => ({
+                                      ...p,
+                                      subtitle: o.value,
+                                    }));
                                     setActive(null);
                                   }}
                                   className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors"
                                 >
-                                  {subtitle === o.value ? (
+                                  {temp.subtitle === o.value ? (
                                     <Check className="w-4 h-4 text-[#FF2D2D] shrink-0" />
                                   ) : (
                                     <span className="w-4 h-4 shrink-0" />
                                   )}
                                   <span
-                                    className={`text-sm flex-1 text-left ${subtitle === o.value ? "text-[#FF2D2D] font-semibold" : "text-white/70"}`}
+                                    className={`text-sm flex-1 text-left ${temp.subtitle === o.value ? "text-[#FF2D2D] font-semibold" : "text-white/70"}`}
                                   >
                                     {o.label}
                                   </span>
@@ -571,18 +603,21 @@ function PlayerSettingsModal({
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    onAudio("original");
+                                    setTemp((p) => ({
+                                      ...p,
+                                      audio: "original",
+                                    }));
                                     setActive(null);
                                   }}
                                   className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors"
                                 >
-                                  {audio === "original" ? (
+                                  {temp.audio === "original" ? (
                                     <Check className="w-4 h-4 text-[#FF2D2D] shrink-0" />
                                   ) : (
                                     <span className="w-4 h-4 shrink-0" />
                                   )}
                                   <span
-                                    className={`text-sm flex-1 text-left ${audio === "original" ? "text-[#FF2D2D] font-semibold" : "text-white/70"}`}
+                                    className={`text-sm flex-1 text-left ${temp.audio === "original" ? "text-[#FF2D2D] font-semibold" : "text-white/70"}`}
                                   >
                                     Original
                                   </span>
@@ -608,6 +643,27 @@ function PlayerSettingsModal({
                     </AnimatePresence>
                   </div>
                 ))}
+              </div>
+
+              {/* ── Save / Cancel action row ───────────────────────────── */}
+              <div className="h-px bg-white/10 mx-5" />
+              <div className="flex gap-3 px-5 py-4">
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  className="flex-1 h-11 rounded-2xl bg-white/10 hover:bg-white/15 text-white/80 text-sm font-semibold transition-colors active:scale-[0.97]"
+                  data-ocid="player_settings.cancel_button"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  className="flex-1 h-11 rounded-2xl bg-[#FF2D2D] hover:bg-[#FF2D2D]/90 text-white text-sm font-bold transition-colors active:scale-[0.97] shadow-[0_0_16px_rgba(255,45,45,0.35)]"
+                  data-ocid="player_settings.save_button"
+                >
+                  Save
+                </button>
               </div>
             </div>
           </motion.div>
@@ -1428,13 +1484,15 @@ export function VideoPlayerModal({
   // PiP state
   const [pipActive, setPipActive] = useState(false);
 
-  // Subscribe overlay (appears at 3s)
-  const [showSubscribeOverlay, setShowSubscribeOverlay] = useState(false);
+  // Up Next preview card (last 5s + after video ends)
+  const [showUpNext, setShowUpNext] = useState(false);
+  const [upNextCountdown, setUpNextCountdown] = useState(5);
+  const [upNextCancelled, setUpNextCancelled] = useState(false);
+  const upNextTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Actions
   const [playlistOpen, setPlaylistOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-  const [showEndScreen, setShowEndScreen] = useState(false);
   const [descExpanded, setDescExpanded] = useState(false);
 
   // Per-video derived
@@ -1511,7 +1569,7 @@ export function VideoPlayerModal({
   );
 
   // ── reset on open/video change ────────────────────────────────────────────
-  // biome-ignore lint/correctness/useExhaustiveDependencies: dragY is a stable MotionValue ref
+  // biome-ignore lint/correctness/useExhaustiveDependencies: dragY is a stable MotionValue ref; changeSubtitle dep omitted to avoid re-run loop
   useEffect(() => {
     if (!open || !post) return;
     const vid = post.id.toString();
@@ -1521,12 +1579,56 @@ export function VideoPlayerModal({
     setComments(loadComments(vid));
     setNewComment("");
     setDescExpanded(false);
-    setShowEndScreen(false);
+    setShowUpNext(false);
+    setUpNextCountdown(5);
+    setUpNextCancelled(false);
     setPipActive(false);
-    setShowSubscribeOverlay(false);
     dragY.set(0);
     mutateRef.current(post.id);
     if (uid && uid !== "guest") updateActiveStatus(uid);
+
+    // Restore persisted player preferences from localStorage
+    try {
+      const savedQuality = localStorage.getItem(
+        "player_quality",
+      ) as QualityOption | null;
+      const savedSpeed = localStorage.getItem("player_speed");
+      const savedSubtitle = localStorage.getItem(
+        "player_subtitle",
+      ) as SubtitleLang | null;
+      const savedAudio = localStorage.getItem(
+        "player_audio",
+      ) as AudioOption | null;
+      if (savedQuality && QUALITY_OPTIONS.includes(savedQuality)) {
+        setQuality(savedQuality);
+      }
+      if (savedSpeed) {
+        const s = Number(savedSpeed) as SpeedOption;
+        if (([0.5, 0.75, 1, 1.25, 1.5, 2] as number[]).includes(s)) {
+          setSpeed(s);
+        }
+      }
+      if (savedSubtitle) {
+        const validSubs: SubtitleLang[] = [
+          "off",
+          "en",
+          "es",
+          "fr",
+          "ar",
+          "hi",
+          "auto",
+        ];
+        if (validSubs.includes(savedSubtitle)) {
+          // Schedule subtitle change after mount so changeSubtitle ref is ready
+          setTimeout(() => void changeSubtitleRef.current(savedSubtitle), 0);
+        }
+      }
+      if (savedAudio === "original" || savedAudio === "dubbed") {
+        setAudio(savedAudio);
+      }
+    } catch {
+      /**/
+    }
   }, [open, post]);
 
   // ── deferred view increment (non-blocking, 300ms after open) ─────────────
@@ -1542,18 +1644,28 @@ export function VideoPlayerModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, post?.id]);
 
-  // ── subscribe overlay at 3s ──────────────────────────────────────────────
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally runs on open/post change
+  // ── Up Next countdown when visible ───────────────────────────────────────
+  // biome-ignore lint/correctness/useExhaustiveDependencies: upNextCancelled is checked inside but we intentionally only re-run when showUpNext toggles
   useEffect(() => {
-    if (!open || !post) return;
-    // Show overlay 3 seconds after the video opens, hide after 5 seconds
-    const showTimer = setTimeout(() => setShowSubscribeOverlay(true), 3000);
-    const hideTimer = setTimeout(() => setShowSubscribeOverlay(false), 8000);
+    if (!showUpNext || upNextCancelled) return;
+    // Reset countdown
+    setUpNextCountdown(5);
+    if (upNextTimerRef.current) clearInterval(upNextTimerRef.current);
+    upNextTimerRef.current = setInterval(() => {
+      setUpNextCountdown((prev) => {
+        if (prev <= 1) {
+          if (upNextTimerRef.current) clearInterval(upNextTimerRef.current);
+          // Auto-dismiss the card when countdown hits 0
+          setShowUpNext(false);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
     return () => {
-      clearTimeout(showTimer);
-      clearTimeout(hideTimer);
+      if (upNextTimerRef.current) clearInterval(upNextTimerRef.current);
     };
-  }, [open, post?.id]);
+  }, [showUpNext]);
 
   // ── subtitle auto-detect ──────────────────────────────────────────────────
   useEffect(() => {
@@ -1570,6 +1682,7 @@ export function VideoPlayerModal({
     if (videoRef.current) videoRef.current.playbackRate = speed;
   }, [speed]);
 
+  // ── apply player settings (called by Save button) ─────────────────────
   // ── scroll → PiP ─────────────────────────────────────────────────────────
   useEffect(() => {
     const el = scrollRef.current;
@@ -1643,11 +1756,67 @@ export function VideoPlayerModal({
     [post],
   );
 
+  // Stable ref so the reset effect can call changeSubtitle without adding it as a dep
+  const changeSubtitleRef = useRef(changeSubtitle);
+  changeSubtitleRef.current = changeSubtitle;
+
+  // ── apply player settings (called by Save button) ─────────────────────
+  const applyPlayerSettings = useCallback(
+    (saved: {
+      quality: QualityOption;
+      speed: SpeedOption;
+      subtitle: SubtitleLang;
+      audio: AudioOption;
+    }) => {
+      const v = videoRef.current;
+
+      // 1. Playback speed — apply immediately, no reload needed
+      setSpeed(saved.speed);
+      if (v) v.playbackRate = saved.speed;
+
+      // 2. Quality — if changed, update label; preserve timestamp + playback state
+      if (saved.quality !== quality) {
+        setQuality(saved.quality);
+        if (v) {
+          const ts = v.currentTime;
+          const wasPlaying = !v.paused;
+          // When a quality-specific URL is available, update v.src here first.
+          v.currentTime = ts;
+          if (wasPlaying) void v.play();
+        }
+      }
+
+      // 3. Subtitles — apply via changeSubtitle helper
+      if (saved.subtitle !== subtitle) {
+        void changeSubtitleRef.current(saved.subtitle);
+      }
+
+      // 4. Audio language (future: swap audio track here)
+      if (saved.audio !== audio) {
+        setAudio(saved.audio);
+      }
+
+      // 5. Persist preferences to localStorage
+      try {
+        localStorage.setItem("player_quality", saved.quality);
+        localStorage.setItem("player_speed", String(saved.speed));
+        localStorage.setItem("player_subtitle", saved.subtitle);
+        localStorage.setItem("player_audio", saved.audio);
+      } catch {
+        /**/
+      }
+    },
+    [quality, subtitle, audio],
+  );
+
   // ── video end ─────────────────────────────────────────────────────────────
   const handleTimeUpdate = () => {
     const v = videoRef.current;
     if (!v || v.duration === 0) return;
-    setShowEndScreen(v.duration - v.currentTime <= 20);
+    const remaining = v.duration - v.currentTime;
+    if (remaining <= 5 && !upNextCancelled) {
+      setShowUpNext(true);
+    }
   };
 
   // ── like / dislike ────────────────────────────────────────────────────────
@@ -1802,55 +1971,16 @@ export function VideoPlayerModal({
                   playsInline
                   className="w-full h-full object-contain"
                   onTimeUpdate={handleTimeUpdate}
-                  onEnded={() => setShowEndScreen(true)}
+                  onEnded={() => {
+                    if (!upNextCancelled) setShowUpNext(true);
+                  }}
                 />
                 <SubtitleOverlay
                   lang={subtitle}
                   translating={translating}
                   lines={subtitleLines}
                 />
-                {/* Subscribe overlay — appears at 3s */}
-                <AnimatePresence>
-                  {showSubscribeOverlay && !isFollowing && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 12 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 8 }}
-                      transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-                      className="absolute bottom-14 left-0 right-0 flex justify-center z-20 pointer-events-none px-4"
-                    >
-                      <div className="flex items-center gap-2.5 bg-black/75 backdrop-blur-sm border border-white/10 rounded-2xl px-4 py-2.5 pointer-events-auto">
-                        <div className="w-7 h-7 rounded-full bg-[#FF2D2D]/20 border border-[#FF2D2D]/40 flex items-center justify-center shrink-0">
-                          <Bell className="w-3.5 h-3.5 text-[#FF2D2D]" />
-                        </div>
-                        <span className="text-white text-xs font-semibold">
-                          Subscribe to{" "}
-                          <span className="text-[#FF2D2D]">@SUB PREMIUM</span>
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void handleSubscribe();
-                            setShowSubscribeOverlay(false);
-                          }}
-                          className="ml-1 px-3 py-1 bg-[#FF2D2D] hover:bg-[#FF2D2D]/90 text-white text-xs font-bold rounded-full transition-colors active:scale-95"
-                          data-ocid="player.subscribe_overlay.button"
-                        >
-                          Subscribe
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShowSubscribeOverlay(false)}
-                          className="w-5 h-5 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/60 transition-colors"
-                          data-ocid="player.subscribe_overlay.close_button"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-                {/* Settings gear */}
+                {/* Settings gear — always visible, never blocked */}
                 <button
                   type="button"
                   onClick={() => setSettingsOpen(true)}
@@ -1860,63 +1990,55 @@ export function VideoPlayerModal({
                 >
                   <Settings className="w-4 h-4" />
                 </button>
-                {/* End screen */}
+                {/* Small Up Next preview card — bottom only, never darkens screen */}
                 <AnimatePresence>
-                  {showEndScreen && (
+                  {showUpNext && suggested[0] && (
                     <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="absolute inset-0 z-30 bg-black/80 flex flex-col items-center justify-center gap-4 px-6"
-                      data-ocid="player.end_screen.panel"
+                      initial={{ opacity: 0, y: 16 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 16 }}
+                      transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                      className="absolute bottom-12 left-3 right-12 z-20 pointer-events-auto"
+                      data-ocid="player.up_next.panel"
                     >
-                      <button
-                        type="button"
-                        onClick={() => setShowEndScreen(false)}
-                        className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/70"
-                        data-ocid="player.end_screen.close_button"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                      <p className="text-white/50 text-xs font-semibold uppercase tracking-widest">
-                        Up Next
-                      </p>
-                      {suggested[0] && (
+                      <div className="flex items-center gap-2.5 bg-black/80 backdrop-blur-sm border border-white/10 rounded-2xl px-3 py-2.5">
+                        {/* Thumbnail */}
+                        <div className="w-14 h-9 rounded-lg overflow-hidden bg-white/10 shrink-0">
+                          <img
+                            src={suggested[0].thumbnailBlob.getDirectURL()}
+                            alt={suggested[0].title}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              (
+                                e.currentTarget as HTMLImageElement
+                              ).style.display = "none";
+                            }}
+                          />
+                        </div>
+                        {/* Text */}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-white/50 text-[10px] font-semibold uppercase tracking-wider leading-none mb-0.5">
+                            Up Next · {upNextCountdown}s
+                          </p>
+                          <p className="text-white text-xs font-semibold line-clamp-1">
+                            {suggested[0].title}
+                          </p>
+                        </div>
+                        {/* Cancel */}
                         <button
                           type="button"
-                          onClick={() => setShowEndScreen(false)}
-                          className="flex flex-col items-center gap-2 bg-white/10 hover:bg-white/20 rounded-2xl p-4 w-48 transition-colors active:scale-95"
-                          data-ocid="player.end_screen.next_button"
+                          onClick={() => {
+                            setUpNextCancelled(true);
+                            setShowUpNext(false);
+                            if (upNextTimerRef.current)
+                              clearInterval(upNextTimerRef.current);
+                          }}
+                          className="shrink-0 h-7 px-2.5 rounded-full bg-white/15 hover:bg-white/25 text-white/80 text-xs font-semibold transition-colors"
+                          data-ocid="player.up_next.cancel_button"
                         >
-                          <div className="w-28 h-16 rounded-xl overflow-hidden bg-secondary">
-                            <img
-                              src={suggested[0].thumbnailBlob.getDirectURL()}
-                              alt={suggested[0].title}
-                              className="w-full h-full object-cover"
-                              onError={(e) => {
-                                (
-                                  e.currentTarget as HTMLImageElement
-                                ).style.display = "none";
-                              }}
-                            />
-                          </div>
-                          <span className="text-white/90 text-xs font-semibold text-center line-clamp-2">
-                            {suggested[0].title}
-                          </span>
+                          Cancel
                         </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowEndScreen(false);
-                          void handleSubscribe();
-                        }}
-                        className="flex items-center gap-2 bg-[#FF2D2D] hover:bg-[#FF2D2D]/90 text-white rounded-full px-5 py-2.5 font-bold text-sm transition-colors active:scale-95"
-                        data-ocid="player.end_screen.subscribe_button"
-                      >
-                        <Bell className="w-4 h-4" />
-                        Subscribe to @{creatorName}
-                      </button>
+                      </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -2230,14 +2352,11 @@ export function VideoPlayerModal({
           open={settingsOpen}
           onClose={() => setSettingsOpen(false)}
           quality={quality}
-          onQuality={setQuality}
           speed={speed}
-          onSpeed={setSpeed}
           subtitle={subtitle}
-          onSubtitle={(l) => void changeSubtitle(l)}
           audio={audio}
-          onAudio={setAudio}
           translating={translating}
+          onSave={applyPlayerSettings}
         />
       )}
 

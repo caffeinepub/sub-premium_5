@@ -21,7 +21,7 @@ import {
   Wand2,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface LiveVerticalSetupPageProps {
   streamId: bigint;
@@ -47,6 +47,100 @@ export default function LiveVerticalSetupPage({
   const [giftGoal, setGiftGoal] = useState("");
   const [isStarting, setIsStarting] = useState(false);
 
+  // Camera state
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
+
+  const stopCamera = useCallback(() => {
+    if (streamRef.current) {
+      for (const track of streamRef.current.getTracks()) {
+        track.stop();
+      }
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setCameraReady(false);
+  }, []);
+
+  const startCamera = useCallback(async () => {
+    // Stop any existing stream first
+    if (streamRef.current) {
+      for (const track of streamRef.current.getTracks()) {
+        track.stop();
+      }
+      streamRef.current = null;
+    }
+    setCameraReady(false);
+    setCameraError(null);
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setCameraError("Camera not supported on this device or browser.");
+      return;
+    }
+
+    try {
+      const constraints: MediaStreamConstraints = {
+        video: {
+          facingMode,
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30 },
+        },
+        audio: false,
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+      // Attempt to apply advanced constraints for auto exposure / auto white balance
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack && "applyConstraints" in videoTrack) {
+        try {
+          await videoTrack.applyConstraints({
+            advanced: [
+              { exposureMode: "continuous" } as MediaTrackConstraintSet,
+              { whiteBalanceMode: "continuous" } as MediaTrackConstraintSet,
+            ],
+          });
+        } catch {
+          // Not supported on all devices — silently ignore
+        }
+      }
+
+      streamRef.current = stream;
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        // Ensure autoplay fires on iOS/Android
+        try {
+          await videoRef.current.play();
+        } catch {
+          // autoPlay attribute handles it; ignore play() errors
+        }
+      }
+
+      setCameraReady(true);
+    } catch (err) {
+      const message =
+        err instanceof Error && err.name === "NotAllowedError"
+          ? "Camera permission denied. Please allow camera access and try again."
+          : "Could not access camera. Please allow camera permission and try again.";
+      setCameraError(message);
+    }
+  }, [facingMode]);
+
+  // Start camera on mount and whenever facingMode changes
+  useEffect(() => {
+    void startCamera();
+    return () => {
+      stopCamera();
+    };
+  }, [startCamera, stopCamera]);
+
   const togglePopup = (popup: ActivePopup["type"]) => {
     setActivePopup((prev) => (prev === popup ? null : popup));
   };
@@ -59,7 +153,12 @@ export default function LiveVerticalSetupPage({
   };
 
   const leftControls = [
-    { icon: FlipHorizontal, label: "Flip", action: () => {} },
+    {
+      icon: FlipHorizontal,
+      label: "Flip",
+      action: () =>
+        setFacingMode((prev) => (prev === "user" ? "environment" : "user")),
+    },
     { icon: Sparkles, label: "Beauty", action: () => {} },
     { icon: Sun, label: "Smooth", action: () => togglePopup("smooth") },
     {
@@ -81,29 +180,111 @@ export default function LiveVerticalSetupPage({
     { icon: Music, label: "Music", action: () => {} },
   ];
 
+  // Build the video CSS filter
+  const baseFilter = "brightness(1.15) contrast(1.05)";
+  const videoFilter = backgroundBlur ? `blur(4px) ${baseFilter}` : baseFilter;
+
   return (
     <div
       className="relative flex flex-col h-full"
       style={{ background: "#000" }}
       data-ocid="live_vertical_setup.page"
     >
-      {/* Camera Preview Background */}
-      <div
-        className="absolute inset-0"
+      {/* Real Camera Preview */}
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
         style={{
-          background:
-            "linear-gradient(145deg, #0a0a0a 0%, #1a1a1a 30%, #0d0d0d 60%, #111 100%)",
-          ...(backgroundBlur ? { filter: "blur(4px)" } : {}),
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+          backgroundColor: "black",
+          filter: videoFilter,
         }}
       />
 
-      {/* Camera Icon Overlay */}
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className="flex flex-col items-center gap-3 opacity-30">
-          <Camera className="w-16 h-16 text-white" strokeWidth={1} />
-          <p className="text-white text-sm font-medium">Camera Preview</p>
+      {/* Loading state — shown while camera is initialising */}
+      {!cameraReady && !cameraError && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "#000",
+            zIndex: 5,
+          }}
+        >
+          <Loader2 className="w-8 h-8 text-white animate-spin" />
+          <p
+            style={{
+              color: "rgba(255,255,255,0.5)",
+              fontSize: 12,
+              marginTop: 12,
+            }}
+          >
+            Requesting camera…
+          </p>
         </div>
-      </div>
+      )}
+
+      {/* Error / retry state */}
+      {cameraError && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "#000",
+            padding: 24,
+            zIndex: 5,
+          }}
+        >
+          <Camera
+            className="w-12 h-12 mb-4"
+            style={{ color: "rgba(255,255,255,0.2)" }}
+          />
+          <p
+            style={{
+              color: "rgba(255,255,255,0.6)",
+              fontSize: 13,
+              textAlign: "center",
+              marginBottom: 20,
+            }}
+          >
+            {cameraError}
+          </p>
+          <button
+            type="button"
+            data-ocid="live_vertical_setup.retry_camera.button"
+            onClick={() => {
+              setCameraError(null);
+              void startCamera();
+            }}
+            style={{
+              background: "#FF2D2D",
+              color: "white",
+              fontWeight: 700,
+              fontSize: 14,
+              padding: "10px 28px",
+              borderRadius: 12,
+              cursor: "pointer",
+              border: "none",
+            }}
+          >
+            Retry Camera
+          </button>
+        </div>
+      )}
 
       {/* Top bar */}
       <div className="relative z-20 flex items-center justify-between px-4 pt-5 pb-3">
