@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { AIAssistant } from "./components/AIAssistant";
 import { BottomNav } from "./components/BottomNav";
 import type { TabId } from "./components/BottomNav";
+import { CreateModal } from "./components/CreateModal";
 import { useActor } from "./hooks/useActor";
 import { useInternetIdentity } from "./hooks/useInternetIdentity";
 import { useGetCallerUserProfile } from "./hooks/useQueries";
@@ -14,7 +15,7 @@ import BattleHistoryPage from "./pages/BattleHistoryPage";
 import HistoryPage from "./pages/HistoryPage";
 import HomePage from "./pages/HomePage";
 import LiveAnalyticsPage from "./pages/LiveAnalyticsPage";
-import LiveCountdownPage from "./pages/LiveCountdownPage";
+// LiveCountdownPage removed — countdown is now an overlay inside LiveVerticalSetupPage
 import LivePage from "./pages/LivePage";
 import LiveReplayPage from "./pages/LiveReplayPage";
 import LiveVerticalSetupPage from "./pages/LiveVerticalSetupPage";
@@ -26,7 +27,6 @@ import RechargePage from "./pages/RechargePage";
 import SetupProfilePage from "./pages/SetupProfilePage";
 import ShortsCreatePage from "./pages/ShortsCreatePage";
 import ShortsPage from "./pages/ShortsPage";
-import UploadPage from "./pages/UploadPage";
 import WalletPage from "./pages/WalletPage";
 import WeeklyLeaderboardPage from "./pages/WeeklyLeaderboardPage";
 import WithdrawPage from "./pages/WithdrawPage";
@@ -37,7 +37,6 @@ import { updateActiveStatus } from "./utils/activeStatus";
 type LiveSubRoute =
   | { type: "setup" }
   | { type: "vertical-setup"; streamId: bigint }
-  | { type: "countdown"; streamId: bigint }
   | {
       type: "watch";
       streamId: bigint;
@@ -64,6 +63,7 @@ function AppInner() {
   } | null>(null);
   const [profileTimedOut, setProfileTimedOut] = useState(false);
   const [initTimedOut, setInitTimedOut] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const { identity, isInitializing } = useInternetIdentity();
   const { actor, isFetching: actorFetching } = useActor();
   const isAuthenticated = !!identity;
@@ -182,13 +182,13 @@ function AppInner() {
   };
 
   // Whether we're in a full-screen sub-route (hide bottom nav)
+  // Also hide nav when create modal is open or live sub-routes are active
   const isFullScreenRoute =
     creatorProfileRoute !== null ||
     walletSubRoute !== null ||
-    (activeTab === "live" &&
-      liveSubRoute !== null &&
-      liveSubRoute.type !== "setup") ||
-    (activeTab === "shorts" && shortsSubRoute !== null);
+    (liveSubRoute !== null && liveSubRoute.type !== "setup") ||
+    (activeTab === "shorts" && shortsSubRoute !== null) ||
+    showCreateModal;
 
   // ─── Page renderer ────────────────────────────────────────────────────────
 
@@ -248,15 +248,14 @@ function AppInner() {
           onBack={() => setShortsSubRoute(null)}
           onGoLive={(streamId) => {
             setShortsSubRoute(null);
-            setActiveTab("live");
             setLiveSubRoute({ type: "vertical-setup", streamId });
           }}
         />
       );
     }
 
-    // LIVE sub-routes
-    if (activeTab === "live" && liveSubRoute !== null) {
+    // LIVE sub-routes — tab-agnostic: check liveSubRoute first
+    if (liveSubRoute !== null) {
       switch (liveSubRoute.type) {
         case "setup":
           return (
@@ -276,26 +275,14 @@ function AppInner() {
 
         case "vertical-setup":
           return (
+            // Countdown is now an overlay inside LiveVerticalSetupPage.
+            // The camera <video> element stays mounted through the entire
+            // countdown so there is no black-screen flash on transition.
             <LiveVerticalSetupPage
               key="live-vertical-setup"
               streamId={liveSubRoute.streamId}
               onBack={() => setLiveSubRoute(null)}
               onGoLive={() =>
-                setLiveSubRoute({
-                  type: "countdown",
-                  streamId: liveSubRoute.streamId,
-                })
-              }
-            />
-          );
-
-        case "countdown":
-          return (
-            <LiveCountdownPage
-              key="live-countdown"
-              streamId={liveSubRoute.streamId}
-              onCancel={() => setLiveSubRoute(null)}
-              onLive={() =>
                 setLiveSubRoute({
                   type: "watch",
                   streamId: liveSubRoute.streamId,
@@ -304,6 +291,9 @@ function AppInner() {
               }
             />
           );
+
+        // "countdown" case is intentionally removed — handled as an overlay
+        // inside LiveVerticalSetupPage to prevent video element unmounting.
 
         case "watch":
           return (
@@ -387,21 +377,6 @@ function AppInner() {
             onGoLive={() => setShortsSubRoute({ type: "create" })}
           />
         );
-      case "upload":
-        return <UploadPage key="upload" />;
-      case "live":
-        return (
-          <LivePage
-            key="live"
-            onNavigateToWatch={(streamId) =>
-              setLiveSubRoute({ type: "watch", streamId, isCreator: false })
-            }
-            onNavigateToSetup={() => {
-              const mockId = BigInt(Date.now());
-              setLiveSubRoute({ type: "vertical-setup", streamId: mockId });
-            }}
-          />
-        );
       case "history":
         return <HistoryPage key="history" />;
       case "profile":
@@ -457,7 +432,11 @@ function AppInner() {
 
           {/* Bottom navigation — hidden in full-screen sub-routes */}
           {!isFullScreenRoute && (
-            <BottomNav activeTab={activeTab} onTabChange={navigateToTab} />
+            <BottomNav
+              activeTab={activeTab}
+              onTabChange={navigateToTab}
+              onCreatePress={() => setShowCreateModal(true)}
+            />
           )}
 
           {/* Floating AI Assistant — hidden in full-screen sub-routes only.
@@ -465,6 +444,21 @@ function AppInner() {
           {!isFullScreenRoute && !!actor && <AIAssistant />}
         </div>
       </div>
+
+      {/* Create Modal — rendered outside the max-width container to cover full screen */}
+      {showCreateModal && (
+        <CreateModal
+          onClose={() => setShowCreateModal(false)}
+          onUploadSelected={(_file) => {
+            setShowCreateModal(false);
+            setActiveTab("home");
+          }}
+          onGoLive={(streamId) => {
+            setShowCreateModal(false);
+            setLiveSubRoute({ type: "vertical-setup", streamId });
+          }}
+        />
+      )}
 
       <Toaster position="top-center" richColors />
     </>

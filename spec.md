@@ -2,47 +2,55 @@
 
 ## Current State
 
-The app has a full live streaming system with:
-- `LiveWatchPage.tsx` — the main viewer page with chat, gifts, hearts, battle mode, co-host layout
-- `LiveCountdownPage.tsx` — 3-2-1 countdown page that calls `onLive()` after countdown
-- `LiveVerticalSetupPage.tsx` — camera setup before going live
-- `LivePage.tsx` — the Go Live tab with stream setup form
-
-### Current Problem
-The `LiveWatchPage` video area renders a dark gradient placeholder when no co-hosts are present, but when the countdown ends and navigates to the watch page the video container can appear blank/black. There is no loading state for the stream connecting, no "reconnecting" error state, and no spinner shown while the stream initializes. The video container uses a dark background gradient that looks like a blank black screen.
-
-The countdown page (`LiveCountdownPage`) calls `onLive()` which triggers the watch page to mount — but the watch page may show a blank dark area before stream loads, which the user sees as a blank screen.
+The app has a bottom navigation with 6 tabs: Home, Shorts, Upload, Go Live (center red circle), History, Profile. Upload and Go Live are separate tab destinations. Tapping "Upload" navigates to UploadPage. Tapping the Go Live center button navigates to LivePage (setup). There is no unified Create modal.
 
 ## Requested Changes (Diff)
 
 ### Add
-- Loading spinner overlay shown on top of the video container while stream is initializing (first 3–5 seconds after mounting)
-- "Reconnecting..." retry state if stream fails, with automatic retry every 3 seconds
-- A clear visual "stream connecting" state with spinner (never blank black)
-- Stream error recovery: show reconnecting banner, retry auto every 3 seconds, never blank screen
-- Proper `streamState` management: `connecting | live | reconnecting | error`
+- `CreateModal` component: full-screen modal with 3-slide horizontal swipe navigation
+  - Slide 0 (left): Upload — large upload icon, title, "Select From Gallery" button, drag & drop area, dark minimal layout, no camera, navigates to edit/upload screen on file select
+  - Slide 1 (center/default): Shorts camera — fullscreen camera preview, large red record button, top-left X close, top-right Effects icon, right vertical tools (flip, timer, 15s/60s toggle), "Short (0–60s)" label above record button
+  - Slide 2 (right): Go Live — live title input, privacy selector, schedule toggle, large "GO LIVE" button, 3-2-1 countdown overlay (camera stays mounted), transitions to LiveWatchPage after countdown
+- Page indicator: 3 dots at top of modal showing active slide
+- Smooth swipe/drag horizontal transition between slides (touch and mouse)
 
 ### Modify
-- `LiveWatchPage.tsx`: Add `streamState` state machine (`connecting → live → reconnecting → error`). Render a spinner overlay on the video container during `connecting` state. After 3s timeout simulate stream connected (since real WebRTC is not wired). Never unmount video container during transitions.
-- `LiveWatchPage.tsx`: Video/stream area must always render immediately — never hidden or replaced with black. The placeholder gradient background stays mounted; the spinner overlays on top.
-- `LiveWatchPage.tsx`: Top section — add visible creator avatar (left side), creator username text, LIVE badge, viewer count. These already exist but need to stay visible at all times regardless of stream state.
-- `LiveWatchPage.tsx`: Bottom section — chat overlay, gift button, like tap animation, share button, input field. These already exist and must stay visible immediately on mount.
-- `LiveCountdownPage.tsx`: When countdown ends (step reaches 0), call `onLive()` immediately — do not add additional delays that could cause blank screen gap.
-- Layout: full-screen vertical. If battle mode active, split-screen 50/50 (already handled by LiveCoHostLayout, keep it).
+- `BottomNav`: Replace the Go Live center red circle and Upload tab with a single "+" center button that opens the CreateModal. Remove `upload` and `live` from tab list. New left group: Home, Shorts. New right group: History, Profile. Center: "+" button (same elevated red circle style).
+- `App.tsx`: Add `showCreateModal` state. Wire "+" button to open/close modal. Remove `upload` and `live` tab case rendering (those flows now only accessible from CreateModal). Keep existing LiveVerticalSetupPage, LiveWatchPage etc. sub-routes intact for when Go Live is triggered from CreateModal.
+- `TabId` type: Remove `upload` and `live` from union. Keep `home | shorts | history | profile`.
 
 ### Remove
-- Any code that could cause the video container to unmount or be hidden during state transitions
-- Blank screen gap between countdown end and watch page render
+- Upload tab from BottomNav left group
+- Live (Go Live) center button from BottomNav (replaced by "+" create button)
+- No separate Upload/Live tab routes from BottomNav navigation
 
 ## Implementation Plan
 
-1. Add `streamState` type and state to `LiveWatchPage`: `'connecting' | 'live' | 'reconnecting'`
-2. On mount, set `streamState = 'connecting'`. After 3s (simulated connect), set to `'live'`
-3. Add optional simulated failure: if stream fails, set to `'reconnecting'`, retry every 3s
-4. Render the video container (gradient/dark background) at ALL times — never unmount it
-5. When `streamState === 'connecting'`: show loading spinner centered over video container with "Connecting to stream..." text
-6. When `streamState === 'reconnecting'`: show "Reconnecting..." banner over video container, keep background visible
-7. When `streamState === 'live'`: hide spinner, show normal video area
-8. Top bar (creator info, LIVE badge, viewer count, follow, close) renders immediately regardless of stream state
-9. Bottom chat overlay renders immediately regardless of stream state
-10. In `LiveCountdownPage`, ensure `onLive()` fires immediately when step hits 0 without extra delays causing blank screen
+1. Create `src/frontend/src/components/CreateModal.tsx`:
+   - Full-screen overlay (fixed inset-0, z-50, bg-black)
+   - 3-slide carousel using touch events (onTouchStart/Move/End) + mouse drag
+   - Default slide index = 1 (Shorts)
+   - Page dots indicator at top
+   - Slide 0: Upload panel — reuses UploadPage logic inline (file picker, dropzone), on file select calls `onUploadSelected(file)` prop
+   - Slide 1: Shorts camera panel — camera preview via getUserMedia, record button, flip/timer/duration tools, close/effects icons
+   - Slide 2: Go Live panel — title input, privacy selector (Public/Followers/Private), schedule toggle, GO LIVE button triggers countdown overlay, on countdown finish calls `onGoLive(streamId)` prop
+   - Close button (X) on Shorts slide closes modal
+
+2. Modify `BottomNav.tsx`:
+   - Remove `upload` and `live` from tab arrays
+   - Change center button from Go Live (Radio icon) to Create "+" (Plus icon)
+   - Center button calls `onCreatePress` prop instead of `onTabChange("live")`
+   - Update `BottomNavProps` to add `onCreatePress: () => void`
+   - Update `TabId` to remove `upload | live`
+
+3. Modify `App.tsx`:
+   - Add `showCreateModal` state (boolean)
+   - Pass `onCreatePress={() => setShowCreateModal(true)}` to BottomNav
+   - Render `<CreateModal>` when `showCreateModal` is true
+   - Wire `onClose` to close modal
+   - Wire `onUploadSelected` → close modal + navigate to upload sub-flow (open UploadPage with pre-selected file)
+   - Wire `onGoLive(streamId)` → close modal + set activeTab="live" + setLiveSubRoute to vertical-setup
+   - Remove `case "upload"` and `case "live"` from tab renderer (or keep upload as internal page reached only from modal)
+   - Update `TabId` import
+
+4. Update `isFullScreenRoute` logic in App.tsx to also hide nav when CreateModal is open

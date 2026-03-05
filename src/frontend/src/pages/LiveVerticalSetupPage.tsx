@@ -19,13 +19,17 @@ import {
   Type,
   UserPlus,
   Wand2,
+  X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+import { useActor } from "../hooks/useActor";
 
 interface LiveVerticalSetupPageProps {
   streamId: bigint;
   onBack: () => void;
+  /** Called after countdown finishes — camera stream is already running */
   onGoLive: () => void;
 }
 
@@ -33,10 +37,16 @@ interface ActivePopup {
   type: "smooth" | "lighting" | "poll" | "goal" | null;
 }
 
+type CountdownStep = 3 | 2 | 1 | 0; // 0 = "GO LIVE!"
+
 export default function LiveVerticalSetupPage({
+  streamId,
   onBack,
   onGoLive,
 }: LiveVerticalSetupPageProps) {
+  const { actor } = useActor();
+
+  // ── UI state ──────────────────────────────────────────────────
   const [micEnabled, setMicEnabled] = useState(true);
   const [chatEnabled, setChatEnabled] = useState(true);
   const [backgroundBlur, setBackgroundBlur] = useState(false);
@@ -47,13 +57,21 @@ export default function LiveVerticalSetupPage({
   const [giftGoal, setGiftGoal] = useState("");
   const [isStarting, setIsStarting] = useState(false);
 
-  // Camera state
+  // ── Camera state ──────────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
   const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
 
+  // ── Countdown state (overlay — video stays mounted) ───────────
+  const [countdownActive, setCountdownActive] = useState(false);
+  const [countdownStep, setCountdownStep] = useState<CountdownStep>(3);
+  const [micLevel, setMicLevel] = useState(60);
+
+  // ──────────────────────────────────────────────────────────────
+  // Camera helpers
+  // ──────────────────────────────────────────────────────────────
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
       for (const track of streamRef.current.getTracks()) {
@@ -68,7 +86,6 @@ export default function LiveVerticalSetupPage({
   }, []);
 
   const startCamera = useCallback(async () => {
-    // Stop any existing stream first
     if (streamRef.current) {
       for (const track of streamRef.current.getTracks()) {
         track.stop();
@@ -96,7 +113,6 @@ export default function LiveVerticalSetupPage({
 
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
 
-      // Attempt to apply advanced constraints for auto exposure / auto white balance
       const videoTrack = stream.getVideoTracks()[0];
       if (videoTrack && "applyConstraints" in videoTrack) {
         try {
@@ -115,11 +131,10 @@ export default function LiveVerticalSetupPage({
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        // Ensure autoplay fires on iOS/Android
         try {
           await videoRef.current.play();
         } catch {
-          // autoPlay attribute handles it; ignore play() errors
+          // autoPlay attribute handles it
         }
       }
 
@@ -133,7 +148,7 @@ export default function LiveVerticalSetupPage({
     }
   }, [facingMode]);
 
-  // Start camera on mount and whenever facingMode changes
+  // Start camera on mount & when facingMode changes
   useEffect(() => {
     void startCamera();
     return () => {
@@ -141,15 +156,64 @@ export default function LiveVerticalSetupPage({
     };
   }, [startCamera, stopCamera]);
 
+  // ──────────────────────────────────────────────────────────────
+  // Countdown logic — runs as an overlay while video stays mounted
+  // ──────────────────────────────────────────────────────────────
+
+  // Mic level animation during countdown
+  useEffect(() => {
+    if (!countdownActive) return;
+    const interval = setInterval(() => {
+      setMicLevel(30 + Math.random() * 60);
+    }, 150);
+    return () => clearInterval(interval);
+  }, [countdownActive]);
+
+  // Countdown tick
+  useEffect(() => {
+    if (!countdownActive) return;
+    if (countdownStep === 0) return;
+
+    const timeout = setTimeout(() => {
+      if (countdownStep > 1) {
+        setCountdownStep((prev) => (prev - 1) as CountdownStep);
+      } else {
+        setCountdownStep(0);
+        // Fire go-live after a tiny delay — video element is still live
+        setTimeout(async () => {
+          try {
+            if (actor) await actor.updateLiveStreamStatus(streamId, "live");
+          } catch (err) {
+            console.error("Failed to update stream status:", err);
+          }
+          toast.success("You're now LIVE!", { duration: 3000 });
+          onGoLive();
+        }, 100);
+      }
+    }, 1000);
+
+    return () => clearTimeout(timeout);
+  }, [countdownActive, countdownStep, streamId, onGoLive, actor]);
+
+  // ──────────────────────────────────────────────────────────────
+  // Handlers
+  // ──────────────────────────────────────────────────────────────
   const togglePopup = (popup: ActivePopup["type"]) => {
     setActivePopup((prev) => (prev === popup ? null : popup));
   };
 
   const handleGoLive = async () => {
     setIsStarting(true);
-    await new Promise((r) => setTimeout(r, 800));
+    await new Promise((r) => setTimeout(r, 400));
     setIsStarting(false);
-    onGoLive();
+    // Start countdown overlay — DO NOT navigate away, keep video mounted
+    setCountdownStep(3);
+    setCountdownActive(true);
+  };
+
+  const handleCancelCountdown = () => {
+    setCountdownActive(false);
+    setCountdownStep(3);
   };
 
   const leftControls = [
@@ -180,9 +244,12 @@ export default function LiveVerticalSetupPage({
     { icon: Music, label: "Music", action: () => {} },
   ];
 
-  // Build the video CSS filter
   const baseFilter = "brightness(1.15) contrast(1.05)";
   const videoFilter = backgroundBlur ? `blur(4px) ${baseFilter}` : baseFilter;
+
+  const countdownDisplay =
+    countdownStep === 0 ? "GO LIVE!" : countdownStep.toString();
+  const isGoLiveText = countdownStep === 0;
 
   return (
     <div
@@ -190,7 +257,7 @@ export default function LiveVerticalSetupPage({
       style={{ background: "#000" }}
       data-ocid="live_vertical_setup.page"
     >
-      {/* Real Camera Preview */}
+      {/* ── Real Camera Preview — ALWAYS MOUNTED, NEVER REMOVED ── */}
       <video
         ref={videoRef}
         autoPlay
@@ -204,11 +271,13 @@ export default function LiveVerticalSetupPage({
           objectFit: "cover",
           backgroundColor: "black",
           filter: videoFilter,
+          // Ensure the element is always visible regardless of phase
+          display: "block",
         }}
       />
 
-      {/* Loading state — shown while camera is initialising */}
-      {!cameraReady && !cameraError && (
+      {/* Loading state */}
+      {!cameraReady && !cameraError && !countdownActive && (
         <div
           style={{
             position: "absolute",
@@ -234,7 +303,7 @@ export default function LiveVerticalSetupPage({
         </div>
       )}
 
-      {/* Error / retry state */}
+      {/* Camera error overlay */}
       {cameraError && (
         <div
           style={{
@@ -246,7 +315,7 @@ export default function LiveVerticalSetupPage({
             justifyContent: "center",
             background: "#000",
             padding: 24,
-            zIndex: 5,
+            zIndex: 10,
           }}
         >
           <Camera
@@ -286,294 +355,461 @@ export default function LiveVerticalSetupPage({
         </div>
       )}
 
-      {/* Top bar */}
-      <div className="relative z-20 flex items-center justify-between px-4 pt-5 pb-3">
-        <button
-          type="button"
-          onClick={onBack}
-          data-ocid="live_vertical_setup.back.button"
-          className="w-10 h-10 rounded-full flex items-center justify-center"
-          style={{ background: "rgba(0,0,0,0.6)" }}
-        >
-          <ArrowLeft className="w-5 h-5 text-white" />
-        </button>
-        <div
-          className="px-4 py-1.5 rounded-full text-xs font-bold text-white"
-          style={{ background: "rgba(0,0,0,0.6)", border: "1px solid #333" }}
-        >
-          Live Setup
-        </div>
-        <div className="w-10" />
-      </div>
-
-      {/* Left Controls */}
-      <div className="absolute left-3 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-3">
-        {leftControls.map((ctrl) => (
-          <button
-            key={ctrl.label}
-            type="button"
-            onClick={ctrl.action}
-            data-ocid={`live_setup.${ctrl.label.toLowerCase()}.button`}
-            className="flex flex-col items-center gap-1"
-          >
-            <motion.div
-              whileTap={{ scale: 0.85 }}
-              className="w-11 h-11 rounded-full flex items-center justify-center"
-              style={{
-                background: ctrl.active
-                  ? "rgba(255,45,45,0.3)"
-                  : "rgba(0,0,0,0.6)",
-                border: `1px solid ${ctrl.active ? "#FF2D2D" : "rgba(255,255,255,0.15)"}`,
-              }}
-            >
-              <ctrl.icon
-                className="w-5 h-5"
-                style={{ color: ctrl.active ? "#FF2D2D" : "white" }}
-                strokeWidth={1.5}
-              />
-            </motion.div>
-            <span className="text-[9px] text-white/70 font-medium">
-              {ctrl.label}
-            </span>
-          </button>
-        ))}
-      </div>
-
-      {/* Right Controls */}
-      <div className="absolute right-3 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-3">
-        {rightControls.map((ctrl) => (
-          <button
-            key={ctrl.label}
-            type="button"
-            onClick={ctrl.action}
-            data-ocid={`live_setup.right_${ctrl.label.toLowerCase()}.button`}
-            className="flex flex-col items-center gap-1"
-          >
-            <motion.div
-              whileTap={{ scale: 0.85 }}
-              className="w-11 h-11 rounded-full flex items-center justify-center"
-              style={{
-                background: "rgba(0,0,0,0.6)",
-                border: "1px solid rgba(255,255,255,0.15)",
-              }}
-            >
-              <ctrl.icon className="w-5 h-5 text-white" strokeWidth={1.5} />
-            </motion.div>
-            <span className="text-[9px] text-white/70 font-medium">
-              {ctrl.label}
-            </span>
-          </button>
-        ))}
-      </div>
-
-      {/* Popup panels */}
+      {/* ── COUNTDOWN OVERLAY — absolute, never replaces video ── */}
       <AnimatePresence>
-        {activePopup === "smooth" && (
+        {countdownActive && (
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
-            className="absolute left-20 top-1/3 z-30 p-4 rounded-2xl"
+            key="countdown-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
             style={{
-              background: "rgba(0,0,0,0.85)",
-              border: "1px solid #333",
-              width: 180,
+              position: "absolute",
+              inset: 0,
+              zIndex: 50,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "space-between",
+              background: "rgba(0,0,0,0.55)",
             }}
+            data-ocid="live_countdown.page"
           >
-            <p className="text-xs text-white font-semibold mb-3">Skin Smooth</p>
-            <Slider
-              value={smoothValue}
-              onValueChange={setSmoothValue}
-              max={100}
-              step={1}
-              className="w-full"
-            />
-            <p className="text-xs text-gray-400 mt-2 text-right">
-              {smoothValue[0]}%
-            </p>
-          </motion.div>
-        )}
-        {activePopup === "lighting" && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
-            className="absolute left-20 top-1/2 z-30 p-4 rounded-2xl"
-            style={{
-              background: "rgba(0,0,0,0.85)",
-              border: "1px solid #333",
-              width: 180,
-            }}
-          >
-            <p className="text-xs text-white font-semibold mb-3">Lighting</p>
-            <Slider
-              value={lightingValue}
-              onValueChange={setLightingValue}
-              max={100}
-              step={1}
-              className="w-full"
-            />
-            <p className="text-xs text-gray-400 mt-2 text-right">
-              {lightingValue[0]}%
-            </p>
-          </motion.div>
-        )}
-        {activePopup === "poll" && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            className="absolute left-1/2 -translate-x-1/2 top-1/4 z-30 p-4 rounded-2xl w-64"
-            style={{ background: "rgba(0,0,0,0.9)", border: "1px solid #333" }}
-          >
-            <p className="text-sm text-white font-semibold mb-3">Create Poll</p>
-            <input
-              value={pollQuestion}
-              onChange={(e) => setPollQuestion(e.target.value)}
-              placeholder="Ask your audience..."
-              className="w-full bg-[#1a1a1a] text-white text-sm rounded-lg px-3 py-2 border border-[#2a2a2a] placeholder:text-gray-600 outline-none focus:border-[#FF2D2D] mb-2"
-            />
-            <div className="flex gap-2 mt-2">
+            {/* Top: Cancel */}
+            <div className="w-full flex items-start justify-between px-4 pt-5">
               <button
                 type="button"
-                onClick={() => togglePopup(null)}
-                className="flex-1 py-2 rounded-lg text-xs text-gray-400"
-                style={{ background: "#1a1a1a" }}
+                onClick={handleCancelCountdown}
+                data-ocid="live_countdown.cancel.button"
+                className="w-10 h-10 rounded-full flex items-center justify-center"
+                style={{ background: "rgba(255,255,255,0.15)" }}
               >
-                Cancel
+                <X className="w-5 h-5 text-white" />
               </button>
-              <button
-                type="button"
-                onClick={() => togglePopup(null)}
-                className="flex-1 py-2 rounded-lg text-xs text-white font-bold"
-                style={{ background: "#FF2D2D" }}
+              <div
+                className="rounded-xl flex items-center justify-center px-3 py-1"
+                style={{
+                  background: "rgba(0,0,0,0.6)",
+                  border: "1px solid #333",
+                }}
               >
-                Add Poll
-              </button>
+                <p className="text-[11px] text-gray-400 font-medium">
+                  LIVE PREVIEW
+                </p>
+              </div>
+              <div className="w-10" />
             </div>
-          </motion.div>
-        )}
-        {activePopup === "goal" && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            className="absolute left-1/2 -translate-x-1/2 top-1/3 z-30 p-4 rounded-2xl w-64"
-            style={{ background: "rgba(0,0,0,0.9)", border: "1px solid #333" }}
-          >
-            <p className="text-sm text-white font-semibold mb-3">Gift Goal</p>
-            <input
-              type="number"
-              value={giftGoal}
-              onChange={(e) => setGiftGoal(e.target.value)}
-              placeholder="Target coins (e.g. 1000)"
-              className="w-full bg-[#1a1a1a] text-white text-sm rounded-lg px-3 py-2 border border-[#2a2a2a] placeholder:text-gray-600 outline-none focus:border-[#FF2D2D] mb-2"
-            />
-            <div className="flex gap-2 mt-2">
-              <button
-                type="button"
-                onClick={() => togglePopup(null)}
-                className="flex-1 py-2 rounded-lg text-xs text-gray-400"
-                style={{ background: "#1a1a1a" }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => togglePopup(null)}
-                className="flex-1 py-2 rounded-lg text-xs text-white font-bold"
-                style={{ background: "#FF2D2D" }}
-              >
-                Set Goal
-              </button>
+
+            {/* Center: Countdown number */}
+            <div className="flex flex-col items-center gap-8">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={countdownDisplay}
+                  initial={{ scale: 2, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.5, opacity: 0 }}
+                  transition={{ duration: 0.35, ease: "easeOut" }}
+                  className="flex items-center justify-center"
+                >
+                  <span
+                    className="font-black"
+                    style={{
+                      fontSize: isGoLiveText ? "3rem" : "8rem",
+                      color: isGoLiveText ? "#FF2D2D" : "#ffffff",
+                      textShadow: isGoLiveText
+                        ? "0 0 40px rgba(255,45,45,0.8)"
+                        : "0 0 30px rgba(255,255,255,0.4)",
+                      fontFamily: "'Sora', sans-serif",
+                      lineHeight: 1,
+                    }}
+                  >
+                    {countdownDisplay}
+                  </span>
+                </motion.div>
+              </AnimatePresence>
+
+              {!isGoLiveText && (
+                <p className="text-gray-300 text-sm font-medium tracking-widest uppercase">
+                  Going Live In…
+                </p>
+              )}
+            </div>
+
+            {/* Bottom: Mic level + connection */}
+            <div className="w-full px-8 pb-12 flex flex-col gap-6">
+              <div className="flex flex-col gap-2">
+                <p className="text-xs text-gray-400 font-medium">
+                  Microphone Level
+                </p>
+                <div
+                  className="w-full h-3 rounded-full overflow-hidden"
+                  style={{ background: "rgba(255,255,255,0.1)" }}
+                >
+                  <motion.div
+                    animate={{ width: `${micLevel}%` }}
+                    transition={{ duration: 0.1, ease: "linear" }}
+                    className="h-full rounded-full"
+                    style={{
+                      background:
+                        micLevel > 80
+                          ? "#FF2D2D"
+                          : micLevel > 50
+                            ? "#22c55e"
+                            : "#3b82f6",
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div
+                  className="flex items-center gap-2 flex-1 p-3 rounded-xl"
+                  style={{ background: "rgba(0,0,0,0.5)" }}
+                >
+                  <span className="relative flex w-3 h-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full w-3 h-3 bg-green-500" />
+                  </span>
+                  <span className="text-sm text-white font-medium">
+                    Connected
+                  </span>
+                  <span className="ml-auto text-xs text-gray-500">
+                    HD 1080p
+                  </span>
+                </div>
+
+                {/* Step dots */}
+                <div className="flex gap-1.5">
+                  {[3, 2, 1].map((n) => (
+                    <div
+                      key={n}
+                      className="w-2.5 h-2.5 rounded-full transition-all duration-300"
+                      style={{
+                        background:
+                          n > countdownStep || countdownStep === 0
+                            ? "#FF2D2D"
+                            : "rgba(255,255,255,0.2)",
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Bottom Controls */}
-      <div className="absolute bottom-28 left-0 right-0 z-20 flex items-center justify-center gap-8 px-8">
-        {[
-          {
-            icon: micEnabled ? Mic : MicOff,
-            label: micEnabled ? "Mic On" : "Mic Off",
-            active: !micEnabled,
-            action: () => setMicEnabled((v) => !v),
-            ocid: "live_setup.mic.toggle",
-          },
-          {
-            icon: chatEnabled ? MessageCircle : MessageCircle,
-            label: chatEnabled ? "Chat On" : "Chat Off",
-            active: !chatEnabled,
-            action: () => setChatEnabled((v) => !v),
-            ocid: "live_setup.chat.toggle",
-          },
-          {
-            icon: Share2,
-            label: "Preview",
-            action: () => {},
-            ocid: "live_setup.share.button",
-          },
-          {
-            icon: UserPlus,
-            label: "Moderator",
-            action: () => {},
-            ocid: "live_setup.moderator.button",
-          },
-        ].map((ctrl) => (
+      {/* ── Setup UI (hidden during countdown but NOT unmounted) ── */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          zIndex: countdownActive ? -1 : 20,
+          pointerEvents: countdownActive ? "none" : "auto",
+          opacity: countdownActive ? 0 : 1,
+          transition: "opacity 0.2s",
+        }}
+      >
+        {/* Top bar */}
+        <div className="relative flex items-center justify-between px-4 pt-5 pb-3">
           <button
-            key={ctrl.label}
             type="button"
-            onClick={ctrl.action}
-            data-ocid={ctrl.ocid}
-            className="flex flex-col items-center gap-1.5"
+            onClick={onBack}
+            data-ocid="live_vertical_setup.back.button"
+            className="w-10 h-10 rounded-full flex items-center justify-center"
+            style={{ background: "rgba(0,0,0,0.6)" }}
           >
-            <div
-              className="w-12 h-12 rounded-full flex items-center justify-center"
+            <ArrowLeft className="w-5 h-5 text-white" />
+          </button>
+          <div
+            className="px-4 py-1.5 rounded-full text-xs font-bold text-white"
+            style={{ background: "rgba(0,0,0,0.6)", border: "1px solid #333" }}
+          >
+            Live Setup
+          </div>
+          <div className="w-10" />
+        </div>
+
+        {/* Left Controls */}
+        <div className="absolute left-3 top-1/2 -translate-y-1/2 flex flex-col gap-3">
+          {leftControls.map((ctrl) => (
+            <button
+              key={ctrl.label}
+              type="button"
+              onClick={ctrl.action}
+              data-ocid={`live_setup.${ctrl.label.toLowerCase()}.button`}
+              className="flex flex-col items-center gap-1"
+            >
+              <motion.div
+                whileTap={{ scale: 0.85 }}
+                className="w-11 h-11 rounded-full flex items-center justify-center"
+                style={{
+                  background: ctrl.active
+                    ? "rgba(255,45,45,0.3)"
+                    : "rgba(0,0,0,0.6)",
+                  border: `1px solid ${ctrl.active ? "#FF2D2D" : "rgba(255,255,255,0.15)"}`,
+                }}
+              >
+                <ctrl.icon
+                  className="w-5 h-5"
+                  style={{ color: ctrl.active ? "#FF2D2D" : "white" }}
+                  strokeWidth={1.5}
+                />
+              </motion.div>
+              <span className="text-[9px] text-white/70 font-medium">
+                {ctrl.label}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {/* Right Controls */}
+        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex flex-col gap-3">
+          {rightControls.map((ctrl) => (
+            <button
+              key={ctrl.label}
+              type="button"
+              onClick={ctrl.action}
+              data-ocid={`live_setup.right_${ctrl.label.toLowerCase()}.button`}
+              className="flex flex-col items-center gap-1"
+            >
+              <motion.div
+                whileTap={{ scale: 0.85 }}
+                className="w-11 h-11 rounded-full flex items-center justify-center"
+                style={{
+                  background: "rgba(0,0,0,0.6)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                }}
+              >
+                <ctrl.icon className="w-5 h-5 text-white" strokeWidth={1.5} />
+              </motion.div>
+              <span className="text-[9px] text-white/70 font-medium">
+                {ctrl.label}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {/* Popup panels */}
+        <AnimatePresence>
+          {activePopup === "smooth" && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="absolute left-20 top-1/3 z-30 p-4 rounded-2xl"
               style={{
-                background: ctrl.active
-                  ? "rgba(255,45,45,0.2)"
-                  : "rgba(0,0,0,0.6)",
-                border: `1px solid ${ctrl.active ? "#FF2D2D" : "rgba(255,255,255,0.2)"}`,
+                background: "rgba(0,0,0,0.85)",
+                border: "1px solid #333",
+                width: 180,
               }}
             >
-              <ctrl.icon
-                className="w-5 h-5"
-                style={{ color: ctrl.active ? "#FF2D2D" : "white" }}
-                strokeWidth={1.5}
+              <p className="text-xs text-white font-semibold mb-3">
+                Skin Smooth
+              </p>
+              <Slider
+                value={smoothValue}
+                onValueChange={setSmoothValue}
+                max={100}
+                step={1}
+                className="w-full"
               />
-            </div>
-            <span className="text-[9px] text-white/60">{ctrl.label}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* GO LIVE NOW Button */}
-      <div className="absolute bottom-8 left-0 right-0 z-20 flex justify-center px-8">
-        <motion.button
-          type="button"
-          data-ocid="live_vertical_setup.go_live.primary_button"
-          onClick={() => void handleGoLive()}
-          disabled={isStarting}
-          whileTap={{ scale: 0.96 }}
-          className="w-full h-14 rounded-2xl font-bold text-white text-base flex items-center justify-center gap-3"
-          style={{
-            background: "#FF2D2D",
-            boxShadow: "0 0 30px rgba(255,45,45,0.5)",
-          }}
-        >
-          {isStarting ? (
-            <Loader2 className="w-5 h-5 animate-spin" />
-          ) : (
-            <>
-              <span className="relative flex w-3 h-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
-                <span className="relative inline-flex rounded-full w-3 h-3 bg-white" />
-              </span>
-              GO LIVE NOW
-            </>
+              <p className="text-xs text-gray-400 mt-2 text-right">
+                {smoothValue[0]}%
+              </p>
+            </motion.div>
           )}
-        </motion.button>
+          {activePopup === "lighting" && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="absolute left-20 top-1/2 z-30 p-4 rounded-2xl"
+              style={{
+                background: "rgba(0,0,0,0.85)",
+                border: "1px solid #333",
+                width: 180,
+              }}
+            >
+              <p className="text-xs text-white font-semibold mb-3">Lighting</p>
+              <Slider
+                value={lightingValue}
+                onValueChange={setLightingValue}
+                max={100}
+                step={1}
+                className="w-full"
+              />
+              <p className="text-xs text-gray-400 mt-2 text-right">
+                {lightingValue[0]}%
+              </p>
+            </motion.div>
+          )}
+          {activePopup === "poll" && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="absolute left-1/2 -translate-x-1/2 top-1/4 z-30 p-4 rounded-2xl w-64"
+              style={{
+                background: "rgba(0,0,0,0.9)",
+                border: "1px solid #333",
+              }}
+            >
+              <p className="text-sm text-white font-semibold mb-3">
+                Create Poll
+              </p>
+              <input
+                value={pollQuestion}
+                onChange={(e) => setPollQuestion(e.target.value)}
+                placeholder="Ask your audience..."
+                className="w-full bg-[#1a1a1a] text-white text-sm rounded-lg px-3 py-2 border border-[#2a2a2a] placeholder:text-gray-600 outline-none focus:border-[#FF2D2D] mb-2"
+              />
+              <div className="flex gap-2 mt-2">
+                <button
+                  type="button"
+                  onClick={() => togglePopup(null)}
+                  className="flex-1 py-2 rounded-lg text-xs text-gray-400"
+                  style={{ background: "#1a1a1a" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => togglePopup(null)}
+                  className="flex-1 py-2 rounded-lg text-xs text-white font-bold"
+                  style={{ background: "#FF2D2D" }}
+                >
+                  Add Poll
+                </button>
+              </div>
+            </motion.div>
+          )}
+          {activePopup === "goal" && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="absolute left-1/2 -translate-x-1/2 top-1/3 z-30 p-4 rounded-2xl w-64"
+              style={{
+                background: "rgba(0,0,0,0.9)",
+                border: "1px solid #333",
+              }}
+            >
+              <p className="text-sm text-white font-semibold mb-3">Gift Goal</p>
+              <input
+                type="number"
+                value={giftGoal}
+                onChange={(e) => setGiftGoal(e.target.value)}
+                placeholder="Target coins (e.g. 1000)"
+                className="w-full bg-[#1a1a1a] text-white text-sm rounded-lg px-3 py-2 border border-[#2a2a2a] placeholder:text-gray-600 outline-none focus:border-[#FF2D2D] mb-2"
+              />
+              <div className="flex gap-2 mt-2">
+                <button
+                  type="button"
+                  onClick={() => togglePopup(null)}
+                  className="flex-1 py-2 rounded-lg text-xs text-gray-400"
+                  style={{ background: "#1a1a1a" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => togglePopup(null)}
+                  className="flex-1 py-2 rounded-lg text-xs text-white font-bold"
+                  style={{ background: "#FF2D2D" }}
+                >
+                  Set Goal
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Bottom Controls */}
+        <div className="absolute bottom-28 left-0 right-0 flex items-center justify-center gap-8 px-8">
+          {[
+            {
+              icon: micEnabled ? Mic : MicOff,
+              label: micEnabled ? "Mic On" : "Mic Off",
+              active: !micEnabled,
+              action: () => setMicEnabled((v) => !v),
+              ocid: "live_setup.mic.toggle",
+            },
+            {
+              icon: chatEnabled ? MessageCircle : MessageCircle,
+              label: chatEnabled ? "Chat On" : "Chat Off",
+              active: !chatEnabled,
+              action: () => setChatEnabled((v) => !v),
+              ocid: "live_setup.chat.toggle",
+            },
+            {
+              icon: Share2,
+              label: "Preview",
+              action: () => {},
+              ocid: "live_setup.share.button",
+            },
+            {
+              icon: UserPlus,
+              label: "Moderator",
+              action: () => {},
+              ocid: "live_setup.moderator.button",
+            },
+          ].map((ctrl) => (
+            <button
+              key={ctrl.label}
+              type="button"
+              onClick={ctrl.action}
+              data-ocid={ctrl.ocid}
+              className="flex flex-col items-center gap-1.5"
+            >
+              <div
+                className="w-12 h-12 rounded-full flex items-center justify-center"
+                style={{
+                  background: ctrl.active
+                    ? "rgba(255,45,45,0.2)"
+                    : "rgba(0,0,0,0.6)",
+                  border: `1px solid ${ctrl.active ? "#FF2D2D" : "rgba(255,255,255,0.2)"}`,
+                }}
+              >
+                <ctrl.icon
+                  className="w-5 h-5"
+                  style={{ color: ctrl.active ? "#FF2D2D" : "white" }}
+                  strokeWidth={1.5}
+                />
+              </div>
+              <span className="text-[9px] text-white/60">{ctrl.label}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* GO LIVE NOW Button */}
+        <div className="absolute bottom-8 left-0 right-0 flex justify-center px-8">
+          <motion.button
+            type="button"
+            data-ocid="live_vertical_setup.go_live.primary_button"
+            onClick={() => void handleGoLive()}
+            disabled={isStarting}
+            whileTap={{ scale: 0.96 }}
+            className="w-full h-14 rounded-2xl font-bold text-white text-base flex items-center justify-center gap-3"
+            style={{
+              background: "#FF2D2D",
+              boxShadow: "0 0 30px rgba(255,45,45,0.5)",
+            }}
+          >
+            {isStarting ? (
+              <Loader2 className="w-5 h-5 animate-spin" />
+            ) : (
+              <>
+                <span className="relative flex w-3 h-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
+                  <span className="relative inline-flex rounded-full w-3 h-3 bg-white" />
+                </span>
+                GO LIVE NOW
+              </>
+            )}
+          </motion.button>
+        </div>
       </div>
     </div>
   );

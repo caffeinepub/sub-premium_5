@@ -1,17 +1,12 @@
-import { Clock, Home, Radio, Upload, User, Zap } from "lucide-react";
+import { Clock, Home, Plus, User, Zap } from "lucide-react";
 import { motion } from "motion/react";
 
-export type TabId =
-  | "home"
-  | "shorts"
-  | "upload"
-  | "live"
-  | "history"
-  | "profile";
+export type TabId = "home" | "shorts" | "history" | "profile";
 
 interface BottomNavProps {
   activeTab: TabId;
   onTabChange: (tab: TabId) => void;
+  onCreatePress: () => void;
 }
 
 const leftTabs = [
@@ -21,12 +16,6 @@ const leftTabs = [
     label: "Shorts",
     icon: Zap,
     ocid: "nav.shorts.link",
-  },
-  {
-    id: "upload" as const,
-    label: "Upload",
-    icon: Upload,
-    ocid: "nav.upload.link",
   },
 ] as const;
 
@@ -45,7 +34,11 @@ const rightTabs = [
   },
 ] as const;
 
-export function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
+export function BottomNav({
+  activeTab,
+  onTabChange,
+  onCreatePress,
+}: BottomNavProps) {
   const renderTab = (
     id: TabId,
     label: string,
@@ -93,8 +86,6 @@ export function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
     );
   };
 
-  const isLiveActive = activeTab === "live";
-
   return (
     <nav
       className="nav-bar shrink-0"
@@ -121,14 +112,14 @@ export function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
           minHeight: 70,
         }}
       >
-        {/* Left group: Home, Shorts, Upload */}
+        {/* Left group: Home, Shorts */}
         <div className="flex flex-1 items-stretch">
           {leftTabs.map(({ id, label, icon: Icon, ocid }) =>
             renderTab(id, label, Icon, ocid),
           )}
         </div>
 
-        {/* Center: Go Live button — true flex center item */}
+        {/* Center: Create (+) button — true flex center item */}
         <div
           style={{
             display: "flex",
@@ -140,12 +131,11 @@ export function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
         >
           <motion.button
             type="button"
-            onClick={() => onTabChange("live")}
-            data-ocid="nav.live.link"
-            aria-label="Go Live"
-            aria-current={isLiveActive ? "page" : undefined}
-            whileTap={{ scale: 0.95 }}
-            className="flex flex-col items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF2E2E]/60"
+            onClick={onCreatePress}
+            data-ocid="nav.create.open_modal_button"
+            aria-label="Create"
+            whileTap={{ scale: 0.92 }}
+            className="flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF2E2E]/60"
             style={{
               position: "relative",
               width: 64,
@@ -156,9 +146,7 @@ export function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
               alignItems: "center",
               justifyContent: "center",
               transform: "translateY(-20px)",
-              boxShadow: isLiveActive
-                ? "0 6px 20px rgba(255, 46, 46, 0.7), 0 0 0 3px rgba(255,46,46,0.25)"
-                : "0 6px 20px rgba(255, 46, 46, 0.4)",
+              boxShadow: "0 6px 20px rgba(255, 46, 46, 0.4)",
               cursor: "pointer",
               pointerEvents: "auto",
               zIndex: 10,
@@ -166,32 +154,7 @@ export function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
               transition: "box-shadow 0.2s ease",
             }}
           >
-            <Radio className="w-6 h-6 text-white" strokeWidth={2.5} />
-            <span
-              style={{
-                fontSize: 8,
-                fontWeight: 700,
-                color: "white",
-                letterSpacing: "0.05em",
-                marginTop: 2,
-                lineHeight: 1,
-              }}
-            >
-              LIVE
-            </span>
-            {/* Live indicator dot */}
-            <span
-              style={{
-                position: "absolute",
-                top: 6,
-                right: 6,
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                backgroundColor: "white",
-                opacity: 0.9,
-              }}
-            />
+            <Plus className="w-7 h-7 text-white" strokeWidth={2.5} />
           </motion.button>
         </div>
 
