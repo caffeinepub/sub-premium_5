@@ -38,7 +38,7 @@ export default function LiveCountdownPage({
         setStep((prev) => (prev - 1) as CountdownStep);
       } else {
         setStep(0);
-        // Trigger go live after short delay
+        // Trigger go live with minimal delay to avoid blank screen gap
         setTimeout(async () => {
           try {
             if (actor) await actor.updateLiveStreamStatus(streamId, "live");
@@ -47,7 +47,7 @@ export default function LiveCountdownPage({
           }
           toast.success("You're now LIVE!", { duration: 3000 });
           onLive();
-        }, 600);
+        }, 100);
       }
     }, 1000);
 

@@ -46,6 +46,9 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+// ─── Stream state machine ────────────────────────────────────────────────────
+type StreamState = "connecting" | "live" | "reconnecting";
 import { toast } from "sonner";
 import type { LiveChatMessage, LiveGift } from "../backend.d";
 import { BattleResultModal } from "../components/BattleResultModal";
@@ -353,6 +356,11 @@ export default function LiveWatchPage({
   const [micEnabled, setMicEnabled] = useState(true);
   const [chatLocked, setChatLocked] = useState(false);
 
+  // Stream state machine — never shows blank screen
+  const [streamState, setStreamState] = useState<StreamState>("connecting");
+  const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Co-host + battle modals
   const [coHostModalOpen, setCoHostModalOpen] = useState(false);
   const [viewerListOpen, setViewerListOpen] = useState(false);
@@ -570,6 +578,46 @@ export default function LiveWatchPage({
       generateSystemMessage("follow"),
     ]);
   }, []);
+
+  // Stream state machine: connecting → live after 3s
+  // Video container is ALWAYS mounted; only overlay changes
+  useEffect(() => {
+    const connectTimer = setTimeout(() => {
+      setStreamState("live");
+    }, 3000);
+    return () => clearTimeout(connectTimer);
+  }, []);
+
+  // Reconnect retry logic — auto-retries every 3s, succeeds after 3 attempts
+  useEffect(() => {
+    if (streamState !== "reconnecting") {
+      if (reconnectTimerRef.current) {
+        clearInterval(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      return;
+    }
+    reconnectTimerRef.current = setInterval(() => {
+      setReconnectAttempts((prev) => {
+        const next = prev + 1;
+        if (next >= 3) {
+          setStreamState("live");
+          if (reconnectTimerRef.current) {
+            clearInterval(reconnectTimerRef.current);
+            reconnectTimerRef.current = null;
+          }
+          return 0;
+        }
+        return next;
+      });
+    }, 3000);
+    return () => {
+      if (reconnectTimerRef.current) {
+        clearInterval(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+    };
+  }, [streamState]);
 
   // Double-tap detection — always triggers (shadow throttling is server-side)
   const handleTap = useCallback(
@@ -844,6 +892,7 @@ export default function LiveWatchPage({
           />
         ) : (
           <>
+            {/* Background gradient — ALWAYS rendered, never unmounted */}
             <div
               className="w-full h-full"
               style={{
@@ -860,17 +909,53 @@ export default function LiveWatchPage({
                   "radial-gradient(ellipse at 50% 30%, rgba(255,45,45,0.08) 0%, transparent 70%)",
               }}
             />
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="flex flex-col items-center gap-3 opacity-20">
-                <div className="w-20 h-20 rounded-full border-2 border-white/30 flex items-center justify-center">
-                  <Zap className="w-10 h-10 text-white" strokeWidth={1} />
+            {/* Double-tap hint — only visible when stream is live */}
+            {streamState === "live" && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="flex flex-col items-center gap-3 opacity-20">
+                  <div className="w-20 h-20 rounded-full border-2 border-white/30 flex items-center justify-center">
+                    <Zap className="w-10 h-10 text-white" strokeWidth={1} />
+                  </div>
+                  <p className="text-white/60 text-xs font-medium">
+                    Double tap to ❤️
+                  </p>
                 </div>
-                <p className="text-white/60 text-xs font-medium">
-                  Double tap to ❤️
-                </p>
               </div>
-            </div>
+            )}
           </>
+        )}
+
+        {/* Stream state overlay — shown over background, never replaces it */}
+        {(streamState === "connecting" || streamState === "reconnecting") && (
+          <div
+            className="absolute inset-0 flex flex-col items-center justify-center z-10 pointer-events-none"
+            style={{ background: "rgba(0,0,0,0.4)" }}
+            data-ocid={
+              streamState === "connecting"
+                ? "live_watch.stream_connecting.loading_state"
+                : "live_watch.stream_reconnecting.loading_state"
+            }
+          >
+            <div className="flex flex-col items-center gap-3">
+              <div
+                className="w-12 h-12 rounded-full animate-spin"
+                style={{
+                  border: "3px solid rgba(255,255,255,0.15)",
+                  borderTopColor: "#FF2D2D",
+                }}
+              />
+              <p className="text-white text-sm font-medium">
+                {streamState === "reconnecting"
+                  ? "Reconnecting..."
+                  : "Connecting to stream..."}
+              </p>
+              {streamState === "reconnecting" && (
+                <p className="text-white/50 text-xs">
+                  Retrying automatically ({reconnectAttempts + 1}/3)
+                </p>
+              )}
+            </div>
+          </div>
         )}
       </div>
 
