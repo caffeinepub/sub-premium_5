@@ -1635,7 +1635,12 @@ function ShortsSlide({
 function GoLiveSlide({
   onGoLive,
   onClose,
-}: { onGoLive: (streamId: bigint) => void; onClose: () => void }) {
+  isActive,
+}: {
+  onGoLive: (streamId: bigint) => void;
+  onClose: () => void;
+  isActive: boolean;
+}) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("Entertainment");
@@ -1649,6 +1654,61 @@ function GoLiveSlide({
   const [countdownStep, setCountdownStep] = useState<CountdownStep>(3);
   const [liveStarted, setLiveStarted] = useState(false);
   const [viewerCount, setViewerCount] = useState(0);
+
+  // ── Camera preview for GoLive slide ──────────────────────────
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [cameraReady, setCameraReady] = useState(false);
+
+  const stopSlideCamera = useCallback(() => {
+    if (streamRef.current) {
+      for (const track of streamRef.current.getTracks()) track.stop();
+      streamRef.current = null;
+    }
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCameraReady(false);
+  }, []);
+
+  const startSlideCamera = useCallback(async () => {
+    if (!navigator.mediaDevices?.getUserMedia) return;
+    if (streamRef.current) {
+      for (const track of streamRef.current.getTracks()) track.stop();
+      streamRef.current = null;
+    }
+    setCameraReady(false);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: "user",
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+        },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        try {
+          await videoRef.current.play();
+        } catch {
+          /* autoPlay */
+        }
+      }
+      setCameraReady(true);
+    } catch {
+      // Camera not available — silently ignore; form still works
+    }
+  }, []);
+
+  // Start/stop camera based on isActive
+  useEffect(() => {
+    if (isActive) {
+      void startSlideCamera();
+    } else {
+      stopSlideCamera();
+    }
+    return () => stopSlideCamera();
+  }, [isActive, startSlideCamera, stopSlideCamera]);
 
   const privacyOptions: PrivacyOption[] = ["Public", "Followers", "Private"];
 
@@ -1712,333 +1772,371 @@ function GoLiveSlide({
 
   return (
     <div
-      className="w-full h-full flex flex-col"
+      className="w-full h-full flex flex-col relative overflow-hidden"
       style={{ background: "#0E0E0E" }}
       data-ocid="create_modal.golive.panel"
     >
-      {/* Header */}
-      <div
-        className="flex items-center gap-3 px-4 shrink-0"
+      {/* ── Camera preview behind the form — always mounted ── */}
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
         style={{
-          paddingTop: "calc(env(safe-area-inset-top) + 52px)",
-          paddingBottom: 16,
-          borderBottom: "1px solid rgba(255,255,255,0.06)",
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+          opacity: cameraReady ? 0.18 : 0,
+          transition: "opacity 0.6s ease",
+          zIndex: 0,
+          pointerEvents: "none",
         }}
-      >
-        <button
-          type="button"
-          onClick={onClose}
-          className="w-9 h-9 rounded-full flex items-center justify-center shrink-0"
-          style={{ background: "rgba(255,255,255,0.08)" }}
-          aria-label="Close"
-        >
-          <ArrowLeft className="w-5 h-5 text-white" strokeWidth={2} />
-        </button>
-        <h2 className="text-white font-bold text-lg flex-1">Go Live</h2>
-        {liveStarted && (
-          <div
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
-            style={{
-              background: "rgba(255,45,45,0.2)",
-              border: "1px solid rgba(255,45,45,0.4)",
-            }}
-          >
-            <span className="w-2 h-2 rounded-full bg-[#FF2D2D] animate-pulse" />
-            <span className="text-xs font-bold text-white">LIVE</span>
-          </div>
-        )}
-      </div>
+      />
 
-      {/* Live viewer badge */}
-      {liveStarted && (
-        <div className="px-4 py-3 flex items-center gap-3">
-          <div
-            className="flex items-center gap-2 px-3 py-2 rounded-2xl"
-            style={{
-              background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.1)",
-            }}
-          >
-            <span className="text-sm">👁</span>
-            <span className="text-sm font-bold text-white">
-              {viewerCount} viewers
-            </span>
-          </div>
-          <div
-            className="px-3 py-2 rounded-2xl"
-            style={{
-              background: "rgba(255,45,45,0.1)",
-              border: "1px solid rgba(255,45,45,0.25)",
-            }}
-          >
-            <span className="text-xs font-bold" style={{ color: "#FF6B6B" }}>
-              Stream is live
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* Scrollable content */}
+      {/* Semi-transparent overlay so form remains readable */}
       <div
-        className="flex-1 overflow-y-auto"
-        style={{ overflowY: "auto", touchAction: "pan-y", paddingBottom: 32 }}
-      >
-        {/* ── Section: Live Info ── */}
-        <div className="px-4 pt-5 pb-2">
-          <p style={sectionLabelStyle}>Live Info</p>
-        </div>
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: "rgba(10,10,10,0.78)",
+          zIndex: 1,
+          pointerEvents: "none",
+        }}
+      />
 
-        <div className="px-4 flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="golive-title"
-              className="text-xs font-semibold"
-              style={{ color: "rgba(255,255,255,0.5)" }}
-            >
-              Stream Title <span style={{ color: "#FF2D2D" }}>*</span>
-            </label>
-            <input
-              id="golive-title"
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="What's your stream about?"
-              maxLength={100}
-              data-ocid="create_modal.golive.title.input"
-              style={inputStyle}
-              className="placeholder:text-white/25"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="golive-description"
-              className="text-xs font-semibold"
-              style={{ color: "rgba(255,255,255,0.5)" }}
-            >
-              Description
-            </label>
-            <textarea
-              id="golive-description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Tell viewers what to expect..."
-              rows={2}
-              maxLength={300}
-              data-ocid="create_modal.golive.description.textarea"
-              style={{ ...inputStyle, resize: "none", lineHeight: 1.6 }}
-              className="placeholder:text-white/25"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <p
-              className="text-xs font-semibold"
-              style={{ color: "rgba(255,255,255,0.5)" }}
-            >
-              Category
-            </p>
+      {/* All content sits above camera and overlay */}
+      <div className="relative z-10 flex flex-col h-full">
+        {/* Header */}
+        <div
+          className="flex items-center gap-3 px-4 shrink-0"
+          style={{
+            paddingTop: "calc(env(safe-area-inset-top) + 52px)",
+            paddingBottom: 16,
+            borderBottom: "1px solid rgba(255,255,255,0.06)",
+          }}
+        >
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-9 h-9 rounded-full flex items-center justify-center shrink-0"
+            style={{ background: "rgba(255,255,255,0.08)" }}
+            aria-label="Close"
+          >
+            <ArrowLeft className="w-5 h-5 text-white" strokeWidth={2} />
+          </button>
+          <h2 className="text-white font-bold text-lg flex-1">Go Live</h2>
+          {liveStarted && (
             <div
-              className="flex flex-wrap gap-2"
-              data-ocid="create_modal.golive.category.select"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+              style={{
+                background: "rgba(255,45,45,0.2)",
+                border: "1px solid rgba(255,45,45,0.4)",
+              }}
             >
-              {CATEGORIES.map((cat) => (
-                <button
-                  key={cat}
-                  type="button"
-                  onClick={() => setCategory(cat)}
-                  className="px-3.5 py-2 rounded-full text-xs font-semibold transition-all duration-150"
-                  style={{
-                    background:
-                      category === cat ? "#FF2D2D" : "rgba(255,255,255,0.06)",
-                    color: category === cat ? "white" : "rgba(255,255,255,0.5)",
-                    border: `1px solid ${category === cat ? "#FF2D2D" : "rgba(255,255,255,0.1)"}`,
-                  }}
-                >
-                  {cat}
-                </button>
-              ))}
+              <span className="w-2 h-2 rounded-full bg-[#FF2D2D] animate-pulse" />
+              <span className="text-xs font-bold text-white">LIVE</span>
             </div>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <p
-              className="text-xs font-semibold"
-              style={{ color: "rgba(255,255,255,0.5)" }}
-            >
-              Privacy
-            </p>
-            <div
-              className="flex gap-2"
-              data-ocid="create_modal.golive.privacy.select"
-            >
-              {privacyOptions.map((opt) => (
-                <button
-                  key={opt}
-                  type="button"
-                  onClick={() => setPrivacy(opt)}
-                  className="flex-1 py-3 rounded-xl font-semibold text-xs transition-all duration-150"
-                  style={{
-                    background:
-                      privacy === opt ? "#FF2D2D" : "rgba(255,255,255,0.06)",
-                    color: privacy === opt ? "white" : "rgba(255,255,255,0.5)",
-                    border: `1px solid ${privacy === opt ? "#FF2D2D" : "rgba(255,255,255,0.1)"}`,
-                  }}
-                >
-                  {opt}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* ── Section: Live Settings ── */}
-        <div className="px-4 pt-6 pb-2">
-          <p style={sectionLabelStyle}>Live Settings</p>
-        </div>
-
-        <div className="px-4 flex flex-col gap-2">
-          <div style={toggleRowStyle}>
-            <div>
-              <p className="text-sm font-semibold text-white">
-                Enable Comments
-              </p>
-              <p
-                className="text-[11px] mt-0.5"
-                style={{ color: "rgba(255,255,255,0.35)" }}
-              >
-                Allow viewers to chat
-              </p>
-            </div>
-            <Switch
-              checked={enableComments}
-              onCheckedChange={setEnableComments}
-              data-ocid="create_modal.golive.comments.switch"
-              className="data-[state=checked]:bg-[#FF2D2D]"
-            />
-          </div>
-
-          <div style={toggleRowStyle}>
-            <div>
-              <p className="text-sm font-semibold text-white">
-                Save Live Replay
-              </p>
-              <p
-                className="text-[11px] mt-0.5"
-                style={{ color: "rgba(255,255,255,0.35)" }}
-              >
-                Record for later viewing
-              </p>
-            </div>
-            <Switch
-              checked={saveReplay}
-              onCheckedChange={setSaveReplay}
-              data-ocid="create_modal.golive.replay.switch"
-              className="data-[state=checked]:bg-[#FF2D2D]"
-            />
-          </div>
-
-          <div style={toggleRowStyle}>
-            <div>
-              <p className="text-sm font-semibold text-white">Allow Gifts</p>
-              <p
-                className="text-[11px] mt-0.5"
-                style={{ color: "rgba(255,255,255,0.35)" }}
-              >
-                Viewers can send gifts
-              </p>
-            </div>
-            <Switch
-              checked={allowGifts}
-              onCheckedChange={setAllowGifts}
-              data-ocid="create_modal.golive.gifts.switch"
-              className="data-[state=checked]:bg-[#FF2D2D]"
-            />
-          </div>
-
-          <div style={toggleRowStyle}>
-            <div>
-              <p className="text-sm font-semibold text-white">Schedule Live</p>
-              <p
-                className="text-[11px] mt-0.5"
-                style={{ color: "rgba(255,255,255,0.35)" }}
-              >
-                Set a future date & time
-              </p>
-            </div>
-            <Switch
-              checked={scheduleEnabled}
-              onCheckedChange={setScheduleEnabled}
-              data-ocid="create_modal.golive.schedule.toggle"
-              className="data-[state=checked]:bg-[#FF2D2D]"
-            />
-          </div>
-
-          {scheduleEnabled && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.2 }}
-            >
-              <input
-                type="datetime-local"
-                value={scheduledDate}
-                onChange={(e) => setScheduledDate(e.target.value)}
-                data-ocid="create_modal.golive.scheduled_date.input"
-                style={{
-                  ...inputStyle,
-                  colorScheme: "dark",
-                }}
-                className="placeholder:text-white/25"
-              />
-            </motion.div>
           )}
         </div>
 
-        {/* ── Section: Start ── */}
-        <div className="px-4 pt-6 pb-2">
-          <p style={sectionLabelStyle}>Start</p>
-        </div>
+        {/* Live viewer badge */}
+        {liveStarted && (
+          <div className="px-4 py-3 flex items-center gap-3">
+            <div
+              className="flex items-center gap-2 px-3 py-2 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <span className="text-sm">👁</span>
+              <span className="text-sm font-bold text-white">
+                {viewerCount} viewers
+              </span>
+            </div>
+            <div
+              className="px-3 py-2 rounded-2xl"
+              style={{
+                background: "rgba(255,45,45,0.1)",
+                border: "1px solid rgba(255,45,45,0.25)",
+              }}
+            >
+              <span className="text-xs font-bold" style={{ color: "#FF6B6B" }}>
+                Stream is live
+              </span>
+            </div>
+          </div>
+        )}
 
-        <div className="px-4 pb-8">
-          <motion.button
-            type="button"
-            data-ocid="create_modal.golive.go_live.primary_button"
-            onClick={handleGoLive}
-            disabled={liveStarted}
-            whileTap={!liveStarted ? { scale: 0.97 } : {}}
-            className="w-full rounded-2xl font-black text-white flex items-center justify-center gap-3 transition-all duration-200"
-            style={{
-              height: 72,
-              background: liveStarted ? "rgba(255,45,45,0.4)" : "#FF2D2D",
-              boxShadow: liveStarted
-                ? "none"
-                : "0 0 40px rgba(255,45,45,0.45), 0 8px 32px rgba(255,45,45,0.3)",
-              fontSize: 18,
-              letterSpacing: "0.06em",
-              cursor: liveStarted ? "not-allowed" : "pointer",
-            }}
-          >
-            {!liveStarted ? (
-              <>
-                <span className="relative flex w-2.5 h-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-70" />
-                  <span className="relative inline-flex rounded-full w-2.5 h-2.5 bg-white" />
-                </span>
-                GO LIVE
-              </>
-            ) : (
-              <>
-                <span className="w-2.5 h-2.5 rounded-full bg-white animate-pulse" />
-                STREAMING
-              </>
+        {/* Scrollable content */}
+        <div
+          className="flex-1 overflow-y-auto"
+          style={{ overflowY: "auto", touchAction: "pan-y", paddingBottom: 32 }}
+        >
+          {/* ── Section: Live Info ── */}
+          <div className="px-4 pt-5 pb-2">
+            <p style={sectionLabelStyle}>Live Info</p>
+          </div>
+
+          <div className="px-4 flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label
+                htmlFor="golive-title"
+                className="text-xs font-semibold"
+                style={{ color: "rgba(255,255,255,0.5)" }}
+              >
+                Stream Title <span style={{ color: "#FF2D2D" }}>*</span>
+              </label>
+              <input
+                id="golive-title"
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="What's your stream about?"
+                maxLength={100}
+                data-ocid="create_modal.golive.title.input"
+                style={inputStyle}
+                className="placeholder:text-white/25"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label
+                htmlFor="golive-description"
+                className="text-xs font-semibold"
+                style={{ color: "rgba(255,255,255,0.5)" }}
+              >
+                Description
+              </label>
+              <textarea
+                id="golive-description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Tell viewers what to expect..."
+                rows={2}
+                maxLength={300}
+                data-ocid="create_modal.golive.description.textarea"
+                style={{ ...inputStyle, resize: "none", lineHeight: 1.6 }}
+                className="placeholder:text-white/25"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <p
+                className="text-xs font-semibold"
+                style={{ color: "rgba(255,255,255,0.5)" }}
+              >
+                Category
+              </p>
+              <div
+                className="flex flex-wrap gap-2"
+                data-ocid="create_modal.golive.category.select"
+              >
+                {CATEGORIES.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setCategory(cat)}
+                    className="px-3.5 py-2 rounded-full text-xs font-semibold transition-all duration-150"
+                    style={{
+                      background:
+                        category === cat ? "#FF2D2D" : "rgba(255,255,255,0.06)",
+                      color:
+                        category === cat ? "white" : "rgba(255,255,255,0.5)",
+                      border: `1px solid ${category === cat ? "#FF2D2D" : "rgba(255,255,255,0.1)"}`,
+                    }}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <p
+                className="text-xs font-semibold"
+                style={{ color: "rgba(255,255,255,0.5)" }}
+              >
+                Privacy
+              </p>
+              <div
+                className="flex gap-2"
+                data-ocid="create_modal.golive.privacy.select"
+              >
+                {privacyOptions.map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => setPrivacy(opt)}
+                    className="flex-1 py-3 rounded-xl font-semibold text-xs transition-all duration-150"
+                    style={{
+                      background:
+                        privacy === opt ? "#FF2D2D" : "rgba(255,255,255,0.06)",
+                      color:
+                        privacy === opt ? "white" : "rgba(255,255,255,0.5)",
+                      border: `1px solid ${privacy === opt ? "#FF2D2D" : "rgba(255,255,255,0.1)"}`,
+                    }}
+                  >
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* ── Section: Live Settings ── */}
+          <div className="px-4 pt-6 pb-2">
+            <p style={sectionLabelStyle}>Live Settings</p>
+          </div>
+
+          <div className="px-4 flex flex-col gap-2">
+            <div style={toggleRowStyle}>
+              <div>
+                <p className="text-sm font-semibold text-white">
+                  Enable Comments
+                </p>
+                <p
+                  className="text-[11px] mt-0.5"
+                  style={{ color: "rgba(255,255,255,0.35)" }}
+                >
+                  Allow viewers to chat
+                </p>
+              </div>
+              <Switch
+                checked={enableComments}
+                onCheckedChange={setEnableComments}
+                data-ocid="create_modal.golive.comments.switch"
+                className="data-[state=checked]:bg-[#FF2D2D]"
+              />
+            </div>
+
+            <div style={toggleRowStyle}>
+              <div>
+                <p className="text-sm font-semibold text-white">
+                  Save Live Replay
+                </p>
+                <p
+                  className="text-[11px] mt-0.5"
+                  style={{ color: "rgba(255,255,255,0.35)" }}
+                >
+                  Record for later viewing
+                </p>
+              </div>
+              <Switch
+                checked={saveReplay}
+                onCheckedChange={setSaveReplay}
+                data-ocid="create_modal.golive.replay.switch"
+                className="data-[state=checked]:bg-[#FF2D2D]"
+              />
+            </div>
+
+            <div style={toggleRowStyle}>
+              <div>
+                <p className="text-sm font-semibold text-white">Allow Gifts</p>
+                <p
+                  className="text-[11px] mt-0.5"
+                  style={{ color: "rgba(255,255,255,0.35)" }}
+                >
+                  Viewers can send gifts
+                </p>
+              </div>
+              <Switch
+                checked={allowGifts}
+                onCheckedChange={setAllowGifts}
+                data-ocid="create_modal.golive.gifts.switch"
+                className="data-[state=checked]:bg-[#FF2D2D]"
+              />
+            </div>
+
+            <div style={toggleRowStyle}>
+              <div>
+                <p className="text-sm font-semibold text-white">
+                  Schedule Live
+                </p>
+                <p
+                  className="text-[11px] mt-0.5"
+                  style={{ color: "rgba(255,255,255,0.35)" }}
+                >
+                  Set a future date & time
+                </p>
+              </div>
+              <Switch
+                checked={scheduleEnabled}
+                onCheckedChange={setScheduleEnabled}
+                data-ocid="create_modal.golive.schedule.toggle"
+                className="data-[state=checked]:bg-[#FF2D2D]"
+              />
+            </div>
+
+            {scheduleEnabled && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2 }}
+              >
+                <input
+                  type="datetime-local"
+                  value={scheduledDate}
+                  onChange={(e) => setScheduledDate(e.target.value)}
+                  data-ocid="create_modal.golive.scheduled_date.input"
+                  style={{
+                    ...inputStyle,
+                    colorScheme: "dark",
+                  }}
+                  className="placeholder:text-white/25"
+                />
+              </motion.div>
             )}
-          </motion.button>
+          </div>
+
+          {/* ── Section: Start ── */}
+          <div className="px-4 pt-6 pb-2">
+            <p style={sectionLabelStyle}>Start</p>
+          </div>
+
+          <div className="px-4 pb-8">
+            <motion.button
+              type="button"
+              data-ocid="create_modal.golive.go_live.primary_button"
+              onClick={handleGoLive}
+              disabled={liveStarted}
+              whileTap={!liveStarted ? { scale: 0.97 } : {}}
+              className="w-full rounded-2xl font-black text-white flex items-center justify-center gap-3 transition-all duration-200"
+              style={{
+                height: 72,
+                background: liveStarted ? "rgba(255,45,45,0.4)" : "#FF2D2D",
+                boxShadow: liveStarted
+                  ? "none"
+                  : "0 0 40px rgba(255,45,45,0.45), 0 8px 32px rgba(255,45,45,0.3)",
+                fontSize: 18,
+                letterSpacing: "0.06em",
+                cursor: liveStarted ? "not-allowed" : "pointer",
+              }}
+            >
+              {!liveStarted ? (
+                <>
+                  <span className="relative flex w-2.5 h-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-70" />
+                    <span className="relative inline-flex rounded-full w-2.5 h-2.5 bg-white" />
+                  </span>
+                  GO LIVE
+                </>
+              ) : (
+                <>
+                  <span className="w-2.5 h-2.5 rounded-full bg-white animate-pulse" />
+                  STREAMING
+                </>
+              )}
+            </motion.button>
+          </div>
         </div>
       </div>
+      {/* end z-10 content wrapper */}
 
-      {/* ── Countdown Overlay ── */}
+      {/* ── Countdown Overlay — sits above camera video ── */}
       <AnimatePresence>
         {countdownActive && (
           <motion.div
@@ -2047,8 +2145,8 @@ function GoLiveSlide({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="absolute inset-0 z-50 flex flex-col items-center justify-center"
-            style={{ background: "rgba(0,0,0,0.88)" }}
+            className="absolute inset-0 flex flex-col items-center justify-center"
+            style={{ background: "rgba(0,0,0,0.55)", zIndex: 60 }}
           >
             <button
               type="button"
@@ -2315,6 +2413,7 @@ export function CreateModal({
           >
             <GoLiveSlide
               onClose={onClose}
+              isActive={slideIndex === 2}
               onGoLive={(streamId) => {
                 onGoLive(streamId);
               }}
