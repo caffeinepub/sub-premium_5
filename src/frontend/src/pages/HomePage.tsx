@@ -1,6 +1,6 @@
 import { Bell, SlidersHorizontal, Tv2, User } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { VideoPost } from "../backend.d";
 import { AISearchBar } from "../components/AISearchBar";
 import { CategoryTabs } from "../components/CategoryTabs";
@@ -64,6 +64,19 @@ export default function HomePage({ onCreatorClick }: HomePageProps) {
   const [sortMode, setSortMode] = useState<SortMode>("latest");
   const [showSortMenu, setShowSortMenu] = useState(false);
 
+  // Animated header: "Welcome to SUB TV" → logo + "SUB PREMIUM"
+  const [headerPhase, setHeaderPhase] = useState<"welcome" | "logo">("welcome");
+  const headerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    // After 2200ms start fade-out of welcome text, then switch to logo
+    headerTimerRef.current = setTimeout(() => {
+      setHeaderPhase("logo");
+    }, 2200);
+    return () => {
+      if (headerTimerRef.current) clearTimeout(headerTimerRef.current);
+    };
+  }, []);
+
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   const categoryFilteredVideos = useMemo(
@@ -107,10 +120,41 @@ export default function HomePage({ onCreatorClick }: HomePageProps) {
       <div className="sticky top-0 z-10 bg-background shrink-0">
         {/* Header */}
         <header className="px-4 pt-4 pb-2 flex items-center justify-between gap-2 min-h-[56px]">
-          {/* Logo */}
-          <h1 className="text-lg font-black tracking-tight text-[#FF2D2D]">
-            SUB PREMIUM
-          </h1>
+          {/* Animated logo / welcome text */}
+          <div className="flex items-center gap-2 overflow-hidden">
+            <AnimatePresence mode="wait">
+              {headerPhase === "welcome" ? (
+                <motion.h1
+                  key="welcome"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.6 }}
+                  className="text-[22px] font-black tracking-[1.5px] text-white whitespace-nowrap"
+                >
+                  Welcome to SUB TV
+                </motion.h1>
+              ) : (
+                <motion.div
+                  key="logo"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 1.0 }}
+                  className="flex items-center gap-2"
+                >
+                  {/* YouTube-style red play badge */}
+                  <span className="w-9 h-6 bg-[#FF0000] rounded-md flex items-center justify-center shrink-0">
+                    <span className="text-white font-bold text-xs leading-none">
+                      ▶
+                    </span>
+                  </span>
+                  <h1 className="text-[22px] font-black tracking-[1.5px] text-white whitespace-nowrap">
+                    SUB PREMIUM
+                  </h1>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
 
           {/* Right icons */}
           <div className="flex items-center gap-2">

@@ -14,6 +14,16 @@
  *           pinned comment, AI-suggest reply.
  */
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,6 +50,7 @@ import {
   ChevronUp,
   Copy,
   Download,
+  Flag,
   Languages,
   ListVideo,
   Loader2,
@@ -48,6 +59,7 @@ import {
   MonitorPlay,
   MoreHorizontal,
   MoreVertical,
+  Pencil,
   Pin,
   Plus,
   RefreshCw,
@@ -76,6 +88,7 @@ import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import {
   useAddVideoToPlaylist,
   useCreatePlaylist,
+  useDeleteVideoPost,
   useFollowCreator,
   useGetUsername,
   useGetUsernameByPrincipal,
@@ -1464,6 +1477,7 @@ export function VideoPlayerModal({
   const recordWatchHistory = useRecordWatchHistory();
   const recordVideoView = useRecordVideoView();
   const toggleVideoLike = useToggleVideoLike();
+  const deleteVideoPost = useDeleteVideoPost();
   const { data: allVideos } = useListVideoPosts();
   const followCreator = useFollowCreator();
   const unfollowCreator = useUnfollowCreator();
@@ -1500,6 +1514,15 @@ export function VideoPlayerModal({
   const [playlistOpen, setPlaylistOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [descExpanded, setDescExpanded] = useState(false);
+
+  // More Options / Edit / Delete state
+  const [moreSheetOpen, setMoreSheetOpen] = useState(false);
+  const [editSheetOpen, setEditSheetOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [localTitle, setLocalTitle] = useState<string | null>(null);
+  const [localDescription, setLocalDescription] = useState<string | null>(null);
 
   // Per-video derived
   const videoIdStr = post?.id.toString() ?? "";
@@ -1604,6 +1627,8 @@ export function VideoPlayerModal({
     setUpNextCountdown(3);
     setUpNextCancelled(false);
     setPipActive(false);
+    setLocalTitle(null);
+    setLocalDescription(null);
     dragY.set(0);
     mutateRef.current(post.id);
     if (uid && uid !== "guest") updateActiveStatus(uid);
@@ -2109,7 +2134,7 @@ export function VideoPlayerModal({
               <div className="px-4 pt-3 pb-1">
                 <DialogHeader>
                   <DialogTitle className="text-base font-bold leading-snug text-foreground text-left">
-                    {post.title}
+                    {localTitle ?? post.title}
                   </DialogTitle>
                 </DialogHeader>
                 <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
@@ -2203,9 +2228,9 @@ export function VideoPlayerModal({
                 {/* More */}
                 <button
                   type="button"
-                  onClick={() => toast.info("More options coming soon")}
+                  onClick={() => setMoreSheetOpen(true)}
                   className="flex items-center justify-center bg-secondary/60 hover:bg-secondary w-9 h-9 rounded-full text-foreground transition-colors shrink-0"
-                  data-ocid="player.more.button"
+                  data-ocid="player.more.open_modal_button"
                 >
                   <MoreHorizontal className="w-4 h-4" />
                 </button>
@@ -2254,14 +2279,14 @@ export function VideoPlayerModal({
               <div className="h-px bg-border/15 mx-4" />
 
               {/* ── 5. DESCRIPTION ───────────────────────────────────── */}
-              {post.description && (
+              {(localDescription ?? post.description) && (
                 <div className="px-4 py-3" data-ocid="player.description.panel">
                   <p
                     className={`text-sm text-muted-foreground leading-relaxed ${descExpanded ? "" : "line-clamp-2"}`}
                   >
-                    {post.description}
+                    {localDescription ?? post.description}
                   </p>
-                  {post.description.length > 100 && (
+                  {(localDescription ?? post.description).length > 100 && (
                     <button
                       type="button"
                       onClick={() => setDescExpanded((p) => !p)}
@@ -2447,6 +2472,273 @@ export function VideoPlayerModal({
           onClose={() => setShareOpen(false)}
           title={post.title}
         />
+      )}
+
+      {/* ── More Options sheet ───────────────────────────────────────────── */}
+      {open && (
+        <Sheet
+          open={moreSheetOpen}
+          onOpenChange={(o) => !o && setMoreSheetOpen(false)}
+        >
+          <SheetContent
+            side="bottom"
+            className="bg-card border-border/30 rounded-t-3xl p-0"
+            data-ocid="player.more.sheet"
+          >
+            <SheetHeader className="px-5 pt-5 pb-3">
+              <div className="flex items-center justify-between">
+                <SheetTitle className="text-base font-bold">
+                  More Options
+                </SheetTitle>
+                <button
+                  type="button"
+                  onClick={() => setMoreSheetOpen(false)}
+                  className="w-8 h-8 rounded-xl bg-secondary/60 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                  data-ocid="player.more.close_button"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </SheetHeader>
+            <div className="h-px bg-border/20 mx-5" />
+            <div className="px-4 py-3 pb-8 space-y-1">
+              {isOwnVideo ? (
+                <>
+                  {/* Edit Video */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditTitle(localTitle ?? post.title);
+                      setEditDescription(localDescription ?? post.description);
+                      setMoreSheetOpen(false);
+                      setEditSheetOpen(true);
+                    }}
+                    className="w-full flex items-center gap-3 bg-secondary/30 hover:bg-secondary/50 rounded-2xl px-4 py-3.5 transition-colors text-left"
+                    data-ocid="player.more.edit_button"
+                  >
+                    <div className="w-9 h-9 rounded-xl bg-primary/15 flex items-center justify-center shrink-0">
+                      <Pencil className="w-4 h-4 text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold">Edit Video</p>
+                      <p className="text-xs text-muted-foreground">
+                        Update title and description
+                      </p>
+                    </div>
+                  </button>
+                  {/* Delete Video */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMoreSheetOpen(false);
+                      setDeleteConfirmOpen(true);
+                    }}
+                    className="w-full flex items-center gap-3 bg-destructive/5 hover:bg-destructive/10 rounded-2xl px-4 py-3.5 transition-colors text-left"
+                    data-ocid="player.more.delete_button"
+                  >
+                    <div className="w-9 h-9 rounded-xl bg-destructive/15 flex items-center justify-center shrink-0">
+                      <Trash2 className="w-4 h-4 text-destructive" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-destructive">
+                        Delete Video
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Permanently remove this video
+                      </p>
+                    </div>
+                  </button>
+                </>
+              ) : (
+                <>
+                  {/* Report */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      toast.info("Report submitted");
+                      setMoreSheetOpen(false);
+                    }}
+                    className="w-full flex items-center gap-3 bg-secondary/30 hover:bg-secondary/50 rounded-2xl px-4 py-3.5 transition-colors text-left"
+                    data-ocid="player.more.report_button"
+                  >
+                    <div className="w-9 h-9 rounded-xl bg-secondary/60 flex items-center justify-center shrink-0">
+                      <Flag className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold">Report</p>
+                      <p className="text-xs text-muted-foreground">
+                        Flag inappropriate content
+                      </p>
+                    </div>
+                  </button>
+                  {/* Not Interested */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      toast.info("Got it, we'll show less like this");
+                      setMoreSheetOpen(false);
+                    }}
+                    className="w-full flex items-center gap-3 bg-secondary/30 hover:bg-secondary/50 rounded-2xl px-4 py-3.5 transition-colors text-left"
+                    data-ocid="player.more.not_interested_button"
+                  >
+                    <div className="w-9 h-9 rounded-xl bg-secondary/60 flex items-center justify-center shrink-0">
+                      <X className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold">Not Interested</p>
+                      <p className="text-xs text-muted-foreground">
+                        Show fewer videos like this
+                      </p>
+                    </div>
+                  </button>
+                </>
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
+      )}
+
+      {/* ── Edit Video sheet ─────────────────────────────────────────────── */}
+      {open && (
+        <Sheet
+          open={editSheetOpen}
+          onOpenChange={(o) => !o && setEditSheetOpen(false)}
+        >
+          <SheetContent
+            side="bottom"
+            className="bg-card border-border/30 rounded-t-3xl p-0 max-h-[85vh]"
+            data-ocid="player.edit_video.sheet"
+          >
+            <SheetHeader className="px-5 pt-5 pb-3">
+              <div className="flex items-center justify-between">
+                <SheetTitle className="text-base font-bold">
+                  Edit Video
+                </SheetTitle>
+                <button
+                  type="button"
+                  onClick={() => setEditSheetOpen(false)}
+                  className="w-8 h-8 rounded-xl bg-secondary/60 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                  data-ocid="player.edit_video.close_button"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </SheetHeader>
+            <div className="h-px bg-border/20 mx-5" />
+            <div className="px-5 py-4 space-y-4 pb-8">
+              {/* Title */}
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="edit-video-title"
+                  className="text-xs font-semibold text-muted-foreground uppercase tracking-wide"
+                >
+                  Title
+                </label>
+                <Input
+                  id="edit-video-title"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  placeholder="Video title…"
+                  className="bg-secondary/40 border-border/30 rounded-2xl text-sm h-11"
+                  data-ocid="player.edit_video.title.input"
+                />
+              </div>
+              {/* Description */}
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="edit-video-description"
+                  className="text-xs font-semibold text-muted-foreground uppercase tracking-wide"
+                >
+                  Description
+                </label>
+                <Textarea
+                  id="edit-video-description"
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  placeholder="Describe your video…"
+                  rows={4}
+                  className="bg-secondary/40 border-border/30 rounded-2xl text-sm resize-none"
+                  data-ocid="player.edit_video.description.textarea"
+                />
+              </div>
+              {/* Action buttons */}
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setEditSheetOpen(false)}
+                  className="flex-1 h-11 rounded-2xl bg-secondary/60 hover:bg-secondary text-foreground/80 text-sm font-semibold transition-colors"
+                  data-ocid="player.edit_video.cancel_button"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!editTitle.trim()) {
+                      toast.error("Title cannot be empty");
+                      return;
+                    }
+                    setLocalTitle(editTitle.trim());
+                    setLocalDescription(editDescription.trim());
+                    setEditSheetOpen(false);
+                    toast.success("Video updated");
+                  }}
+                  className="flex-1 h-11 rounded-2xl bg-[#FF2D2D] hover:bg-[#FF2D2D]/90 text-white text-sm font-bold transition-colors shadow-[0_0_16px_rgba(255,45,45,0.3)]"
+                  data-ocid="player.edit_video.save_button"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </div>
+          </SheetContent>
+        </Sheet>
+      )}
+
+      {/* ── Delete Confirmation dialog ────────────────────────────────────── */}
+      {open && (
+        <AlertDialog
+          open={deleteConfirmOpen}
+          onOpenChange={(o) => !o && setDeleteConfirmOpen(false)}
+        >
+          <AlertDialogContent
+            className="bg-card border-border/40 rounded-3xl max-w-sm mx-4"
+            data-ocid="player.delete_video.dialog"
+          >
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-base font-bold">
+                Delete Video?
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-sm text-muted-foreground">
+                This will permanently delete your video and cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="flex gap-3 mt-2">
+              <AlertDialogCancel
+                className="flex-1 h-11 rounded-2xl bg-secondary/60 hover:bg-secondary border-0 text-foreground/80 text-sm font-semibold"
+                data-ocid="player.delete_video.cancel_button"
+              >
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                className="flex-1 h-11 rounded-2xl bg-destructive hover:bg-destructive/90 text-white text-sm font-bold border-0"
+                data-ocid="player.delete_video.confirm_button"
+                onClick={async () => {
+                  try {
+                    await deleteVideoPost.mutateAsync(post.id);
+                    toast.success("Video deleted");
+                    setDeleteConfirmOpen(false);
+                    onClose();
+                  } catch {
+                    toast.error("Failed to delete video");
+                    setDeleteConfirmOpen(false);
+                  }
+                }}
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       )}
     </>
   );
