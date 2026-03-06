@@ -296,6 +296,8 @@ interface AISearchBarProps {
   onSearch: (query: string) => void;
   onAiSearch?: (query: string) => void;
   onVideoClick?: (video: VideoPost) => void;
+  /** Map of principal string → username for @user search matching */
+  usernameMap?: Map<string, string>;
 }
 
 export function AISearchBar({
@@ -433,7 +435,7 @@ export function AISearchBar({
           ref={inputRef}
           type="text"
           data-ocid="home.ai_search.input"
-          placeholder="Search or ask AI..."
+          placeholder="Search creators, @users, videos"
           value={query}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
@@ -442,7 +444,7 @@ export function AISearchBar({
           className="flex-1 bg-transparent text-sm text-white
                      placeholder:text-muted-foreground outline-none border-none
                      min-w-0"
-          aria-label="Search or ask AI"
+          aria-label="Search creators, users, or videos"
           autoComplete="off"
           autoCorrect="off"
           autoCapitalize="off"

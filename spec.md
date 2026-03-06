@@ -2,78 +2,52 @@
 
 ## Current State
 
-The app has two upload surfaces:
-1. **CreateModal.tsx** — `UploadSlide` component inside the swipe modal. Has a basic `<input type="file" accept="video/*">` button. No duration/size validation, no upload stages, no page-leave prevention, no auto-navigate to video page on completion.
-2. **UploadPage.tsx** — Standalone upload page at `/upload`. Uses `accept="*/*"` (no video restriction), requires both video and thumbnail to publish (no fallback), shows upload/publishing stages but only 2 states (Uploading / Publishing), no page-leave prevention, no auto-navigate on completion, no size/duration validation.
+The homepage has:
+- Animated "Welcome to SUB TV" → "SUB PREMIUM" header transition
+- AISearchBar component with placeholder "Search or ask AI..." that supports video title/description search + AI assistant mode
+- CategoryTabs for filtering by genre
+- Sort button (Latest / Most Viewed)
+- Video feed via `useListVideoPosts()` rendering `VideoCard` components
+- VideoCard shows: thumbnail, title, @username, relative timestamp, views, likes, comments
+- Notifications panel (bell icon) with hardcoded DEFAULT_NOTIFICATIONS
+- VideoPlayerModal for playback
+- NotificationsPanel with static mock data (upload, subscription, premium types)
 
-Neither surface:
-- Validates file size or video duration
-- Prevents the user from navigating away during upload
-- Shows granular upload stages (Uploading → Processing → Encoding → Finalizing)
-- Auto-navigates to the video detail page on success
-- Allows retry after failure without a full reset
+The search currently only matches video title and description; does not match @usernames or hashtags. Search placeholder is "Search or ask AI..." rather than the branded text.
 
 ## Requested Changes (Diff)
 
 ### Add
-- `accept="video/*"` with `capture` fallback to open the native device file picker on mobile (photos, files, camera, screen recordings, downloads — all surfaces the OS exposes for video)
-- File size validation: reject files > 5 GB with a clear error message before upload begins
-- Duration validation: after file selection, load video metadata and reject videos > 2 hours (7200 seconds) with a clear error message
-- Upload stage progression in both upload surfaces: **Uploading → Processing → Encoding → Finalizing** with animated stage labels
-- Page-leave prevention during active upload: `beforeunload` event listener + on-screen banner "Uploading video. Please stay on this page until upload completes."
-- Auto-navigate to `/video/:id` after successful upload (using the returned post ID)
-- Retry button after upload failure — resets only the upload state, not the whole form (title, description, file selection preserved)
-- Updated file selector copy in CreateModal UploadSlide: "Select Video" with subtitle clarifying all device video sources are supported (gallery, files, camera)
-- `formatFileSize` helper with GB support (5 GB limit display)
+
+1. **Search bar rebrand**: Change placeholder text to "Search creators, @users, videos". Expand search logic to match: creator @usernames, video titles, video descriptions, hashtags (words starting with #).
+2. **Search results panel**: When query is active (non-AI mode), show categorized results: Creator accounts (matching @username), Videos, Shorts label badge, Live streams.
+3. **Auto video distribution**: Videos uploaded appear immediately in homepage feed (already works via `useListVideoPosts` query invalidation — add query refetch trigger on upload completion if not already present).
+4. **Notification system upgrade**: Add "New Video Uploaded" notification type. When a new video is detected (comparing video list length over time), push a notification: title "New Video Uploaded", message "@creatorname uploaded a new video on SUB PREMIUM". Tapping opens the video player.
+5. **Homepage sections**: Below the main feed, add four horizontal content rows:
+   - **Trending** — top videos by view count
+   - **Live Now** — currently active live streams (if any; otherwise show empty placeholder)
+   - **Recommended** — mixed recent videos
+   - **Shorts** — videos tagged/labeled as shorts
+   Each row is a horizontally scrollable card strip with compact cards (thumbnail + title + creator).
+6. **Section card**: New `HomeSectionRow` component — horizontal scroll strip with compact `MiniVideoCard` items.
 
 ### Modify
-- **CreateModal.tsx → UploadSlide**: 
-  - Change video `<input>` to use `accept="video/*"` (triggers native OS picker with photo library, files, camera rolls on both iOS and Android)
-  - Add file size + duration validation on video select
-  - Expand `UploadStage` type to include `"processing" | "encoding" | "finalizing"`
-  - Replace simple progress bar with animated stage indicator showing current stage name + bar
-  - Add `beforeunload` listener when uploading, remove on cleanup
-  - On success: show "Upload complete" message then navigate to `/video/:id`
-  - On failure: show "Upload failed. Please try again." with a Retry button that preserves form state
-  - Update empty-state button label to "Select from Gallery / Files" to signal device-wide access
-  
-- **UploadPage.tsx**:
-  - Change video input `accept` from `"*/*"` to `"video/*"`
-  - Add file size + duration validation on video select
-  - Remove hard requirement for thumbnail (already optional in CreateModal — use fallback PNG if none)
-  - Expand upload stages to 4: Uploading → Processing → Encoding → Finalizing
-  - Add `beforeunload` page-leave prevention during upload
-  - Add on-screen sticky banner during upload: "Uploading video. Please stay on this page until upload completes."
-  - On success: navigate to `/video/:id` automatically after 1.5s
-  - On failure: show retry button that preserves form data
+
+- **AISearchBar**: Change placeholder to "Search creators, @users, videos". Extend `filterVideosBySearch` to also match on username and hashtags extracted from description/title.
+- **HomePage**: Add homepage sections below the main feed list. Add notification generation logic that watches the video list and creates notifications for new uploads. Pass video click handler through to section rows to open VideoPlayerModal.
+- **NotificationsPanel**: Add `videoId` optional field to Notification so tapping an upload notification can navigate to that video.
 
 ### Remove
-- Hard thumbnail requirement in `UploadPage.tsx` (already optional in CreateModal; use the 1×1 PNG fallback)
-- The `"*/*"` accept attribute on both video inputs (replaced by `"video/*"`)
+
+- Nothing removed.
 
 ## Implementation Plan
 
-1. **Both upload surfaces — video input accept + file validation**
-   - Set `accept="video/*"` on all video `<input>` elements
-   - After file selection, validate file size ≤ 5 GB; if exceeded, show toast error and clear selection
-   - After file selection, load video duration via `HTMLVideoElement.duration`; if > 7200s, show toast error and clear selection
-
-2. **UploadSlide in CreateModal.tsx — staged upload + navigation**
-   - Expand `UploadStage` to `"idle" | "uploading" | "processing" | "encoding" | "finalizing" | "done" | "error"`
-   - Replace simple `Uploading…` text with animated `<StageIndicator>` component showing stage name + progress bar
-   - Add `useEffect` to attach/detach `beforeunload` listener based on active upload state
-   - Show sticky warning banner when uploading
-   - On success: set stage to `"done"`, show "Upload complete", then `navigate('/video/${postId}')` after 1.5s
-   - On error: set stage to `"error"`, show "Upload failed. Please try again." + Retry button that calls `handlePublish` again without clearing form
-
-3. **UploadPage.tsx — staged upload + navigation + optional thumbnail**
-   - Remove thumbnail hard requirement from `canPublish`
-   - Expand stage labels to 4-stage sequence
-   - Add `beforeunload` listener
-   - Add on-screen warning banner during upload
-   - On success: `navigate('/video/${postId}')` after 1.5s
-   - On failure: show retry button without clearing form state
-
-4. **UX copy updates**
-   - UploadSlide empty state: "Select from Gallery / Files" with subtitle "Camera, screen recordings, downloads"
-   - UploadPage dropzone: "Tap to select video" with subtitle "Photos, files, camera recordings · Max 5 GB, 2 hrs"
+1. Update `AISearchBar` placeholder text.
+2. Extend search filter in `AISearchBar` and `HomePage` (`filterVideosBySearch`) to match: @username (requires fetching uploader username per video — use display name from post or cached usernames), hashtags (words prefixed with #), title, description.
+3. Add `HomeSectionRow` component: horizontally scrollable row with title, "See all" link, and compact video cards.
+4. Add `MiniHorizontalCard` sub-component: small card with thumbnail (fixed 140×80), title (1 line), creator (1 line), used in section rows.
+5. Update `HomePage` to render four section rows below the main feed using the video data split by criteria (trending by views, recommended by recent, shorts by description keyword).
+6. Update notification logic in `HomePage`: detect new videos compared to previous render cycle, auto-generate "New Video Uploaded" notifications with @creator and videoId.
+7. Update `NotificationsPanel` type to include optional `videoId`. Add click handler that opens VideoPlayerModal for upload notifications.
+8. Pass `setSelectedVideo` callback into notification tap handler in `HomePage`.

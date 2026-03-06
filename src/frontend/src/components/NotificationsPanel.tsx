@@ -11,6 +11,7 @@ export interface Notification {
   message: string;
   time: string;
   read: boolean;
+  videoId?: string;
 }
 
 export const DEFAULT_NOTIFICATIONS: Notification[] = [
@@ -71,6 +72,7 @@ interface NotificationsPanelProps {
   onMarkRead: (id: string) => void;
   onMarkAllRead: () => void;
   onClose: () => void;
+  onVideoOpen?: (videoId: string) => void;
 }
 
 export function NotificationsPanel({
@@ -79,6 +81,7 @@ export function NotificationsPanel({
   onMarkRead,
   onMarkAllRead,
   onClose,
+  onVideoOpen,
 }: NotificationsPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -201,7 +204,17 @@ export function NotificationsPanel({
                         key={notification.id}
                         type="button"
                         data-ocid={ocid}
-                        onClick={() => onMarkRead(notification.id)}
+                        onClick={() => {
+                          onMarkRead(notification.id);
+                          if (
+                            notification.type === "upload" &&
+                            notification.videoId &&
+                            onVideoOpen
+                          ) {
+                            onVideoOpen(notification.videoId);
+                            onClose();
+                          }
+                        }}
                         whileTap={{ scale: 0.99 }}
                         className={[
                           "w-full flex items-start gap-3 px-4 py-3 text-left",
