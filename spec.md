@@ -1,85 +1,95 @@
-# SUB PREMIUM
+# SUB PREMIUM — Advanced Live Stream Features
 
 ## Current State
 
-The app has several live stream UI files:
-- `LiveVerticalSetupPage.tsx` — full-screen camera setup with left/right controls, popup panels, and a 3-2-1 countdown overlay over the video. The camera `<video>` element is always mounted.
-- `LiveCountdownPage.tsx` — standalone countdown page (currently unused in App.tsx routing, commented out).
-- `LivePage.tsx` — a "Go Live" setup form (title, description, privacy, category, thumbnail) shown as the "setup" sub-route.
-- `CreateModal.tsx` (Slide 2 — GoLiveSlide) — has its own countdown overlay over a dark background (no camera preview). Calls `onGoLive(streamId)` after countdown, which transitions App.tsx to `{ type: "watch", streamId, isCreator: true, cameFromSetup: true }`.
-- `LiveWatchPage.tsx` — the main live stream screen for both creator and viewer, with full chat, gifts, hearts, engagement.
+The app has a rebuilt `NewLiveStreamScreen.tsx` with:
+- Camera always mounted
+- 5-second countdown overlay (never replaces video)
+- GO LIVE button
+- Top bar: back, LIVE badge, viewer count
+- Bottom controls: chat input, send, gift, share buttons + end/mic/flip icon row
 
-**The problem:** After the countdown in the GoLiveSlide (CreateModal), the screen goes dark. The GoLiveSlide countdown runs over a dark overlay (no camera), so there is a black screen flash when transitioning to LiveWatchPage. LiveVerticalSetupPage has correct camera-first + overlay countdown, but it is reached via a different route (`vertical-setup`) not used from the main CreateModal "Go Live" button.
+There is a `HomePage.tsx` with category tabs and content rows (Trending, Live Now, etc.) but the "Live Now" row shows mock data.
+
+No Live Discovery feed page exists. No Battle, Co-Host, Moderator, or Virtual Gifts systems exist beyond basic placeholders.
 
 ## Requested Changes (Diff)
 
 ### Add
-- New `NewLiveStreamScreen.tsx` page component that replaces `LiveVerticalSetupPage.tsx` as the live streaming broadcaster UI.
-- The new screen must:
-  1. Mount camera preview IMMEDIATELY on render (full-screen `<video>` element, always mounted, never removed)
-  2. Show CountdownOverlay (5→4→3→2→1) rendered ON TOP of the video — never replacing it
-  3. After countdown reaches 0, set `isLive = true` and call `onGoLive()` — do NOT restart camera or recreate the video element
-  4. While `isLive = true`, show LiveTopBar (back button, LIVE indicator with pulsing dot, viewer count) and LiveControls at bottom (End Live, Mute mic, Flip camera, Chat toggle)
-  5. If camera fails, show ErrorOverlay ("Camera access required" + "Enable Camera" button) — never show black screen
-- `data-ocid` markers on all interactive elements
+
+**1. Live Battles Panel** (overlay inside NewLiveStreamScreen)
+- A "Battle" button in the live controls
+- When tapped, opens a BattlePanel overlay over the camera
+- Split-screen simulation: left = host cam (current feed), right = opponent avatar/placeholder
+- 5-minute countdown timer at top
+- Two gift score progress bars (Host A vs Host B)
+- Animated winner banner when timer ends
+- "Start Battle" / "Cancel" buttons
+
+**2. Co-Host Panel** (overlay inside NewLiveStreamScreen)
+- A "Co-Host" button in the live controls
+- When tapped, opens CoHostPanel showing list of mock viewers to invite
+- Max 4 co-host slots shown as video tile grid (2x2)
+- Host is always in top-left tile (large)
+- Co-host tiles show avatar placeholder + username
+- "Invite" button per viewer, "Remove" button on active co-hosts
+
+**3. Moderator Panel** (overlay inside NewLiveStreamScreen)
+- A "Mod" button in the live controls
+- Opens ModeratorPanel overlay
+- List of mock chat users; each row has: username, "Make Mod" button, "Kick" button
+- Moderators get a red MOD badge next to username in the panel
+- Moderator actions: mute, remove from chat, block, pin comment
+
+**4. Virtual Gifts Panel** (already has a gift button — expand it)
+- Tapping gift button opens GiftPickerPanel overlay (bottom sheet)
+- 5 gift types: Rose 🌹 (1 coin), Fire 🔥 (5 coins), Diamond 💎 (20 coins), Rocket 🚀 (50 coins), Crown 👑 (100 coins)
+- Each gift card shows: emoji, name, coin cost
+- Tapping a gift triggers an animated overlay (emoji flies up from bottom, scale animation)
+- Toast shows "Gift sent! +{n} coins to streamer"
+- Coin earnings counter shown in top bar while live
+
+**5. Live Discovery Page** — new page `LiveDiscoveryPage.tsx`
+- Accessible from bottom nav "Live" tab (currently navigating to live tab shows nothing — wire it)
+- Scrollable vertical feed of live stream cards
+- Each card: gradient thumbnail (colored placeholder), username, LIVE badge, viewer count, Join button
+- 10-second auto-refresh (simulated)
+- Sort: highest viewer count first
+- Empty state message if no streams
+
+**6. Real-time Chat Overlay** (enhance existing chat)
+- Chat messages appear as a scrollable list overlaid on the left side of the screen, above the input
+- Each message: username + message text (bubble style)
+- Auto-scroll to latest message
+- Simulated incoming messages from other "viewers" every few seconds while live
+- Pinned comment shown at top with a pin icon
+- Emoji support in input
+
+**7. Updated Live UI Top Bar**
+- Add streamer avatar circle (placeholder) + username next to LIVE badge
+- Add coin earnings counter (increments as gifts are received)
 
 ### Modify
-- `LiveVerticalSetupPage.tsx` — DELETE the entire file and replace with a re-export of `NewLiveStreamScreen.tsx` OR just update App.tsx to use `NewLiveStreamScreen` directly.
-- `App.tsx` — Update the `vertical-setup` case to use `NewLiveStreamScreen` instead of `LiveVerticalSetupPage`.
-- `CreateModal.tsx` (GoLiveSlide) — Replace the dark-overlay countdown with a camera-first approach: immediately start camera when the GoLive slide is active and user taps GO LIVE, show countdown over the live camera feed (not a black overlay). After countdown, call `onGoLive(streamId)`.
+
+- `NewLiveStreamScreen.tsx` — add Battle, Co-Host, Mod buttons to controls; expand gift button; add chat message list; update top bar with avatar/username/coins
+- `App.tsx` — wire "live" tab to show `LiveDiscoveryPage` instead of nothing; when user taps Join on a card, open `NewLiveStreamScreen` as a viewer (read-only mode)
+- Bottom controls layout: add Battle + Co-Host + Mod buttons in the icon row (6 icons total: End, Mic, Flip, Battle, Co-Host, Mod)
 
 ### Remove
-- `LiveCountdownPage.tsx` — Delete entirely (already unused).
-- The dark background overlay in GoLiveSlide countdown (the `background: "rgba(0,0,0,0.88)"` overlay with no camera underneath).
-- `LiveVerticalSetupPage.tsx` — Replace with new component.
+- Nothing to remove
 
 ## Implementation Plan
 
-1. Create `src/frontend/src/pages/NewLiveStreamScreen.tsx`:
-   - Props: `streamId: bigint`, `onBack: () => void`, `onGoLive: () => void`
-   - State: `cameraReady`, `cameraError`, `isLive`, `countdownActive`, `countdownStep` (5→0), `micEnabled`, `chatVisible`, `facingMode`
-   - Render structure (always in this order, never conditional replace):
-     ```
-     <div style="position:relative; width:100%; height:100%; background:#000">
-       <video ref={videoRef} style="position:absolute; inset:0; width:100%; height:100%; objectFit:cover" autoPlay playsInline muted />
-       {/* Camera loading: shown while !cameraReady && !cameraError */}
-       {/* CountdownOverlay: position:absolute z-50, shown when countdownActive */}
-       {/* LiveTopBar: position:absolute top-0, shown when isLive */}
-       {/* LiveControls: position:absolute bottom-0, shown when isLive */}
-       {/* ErrorOverlay: position:absolute z-100, shown when cameraError */}
-       {/* Pre-live bottom GO LIVE button: shown when cameraReady && !isLive && !countdownActive */}
-     </div>
-     ```
-   - `startCamera()`: requests `getUserMedia({ video: { facingMode, width:{ideal:1280}, height:{ideal:720} }, audio: true })`, assigns to `videoRef.current.srcObject`
-   - On mount: call `startCamera()`, on unmount: stop all tracks
-   - `handleGoLive()`: set `countdownActive=true`, `countdownStep=5`
-   - Countdown tick: useEffect on `countdownStep` when `countdownActive`, setTimeout 1000ms, decrement; when step reaches 0 call `actor.updateLiveStreamStatus(streamId, "live")` then set `isLive=true`, `countdownActive=false`, call `onGoLive()`
-   - Flip camera: stop tracks, toggle facingMode, call `startCamera()` again
-   - CountdownOverlay: large animated number (framer-motion scale+fade), "Going Live..." text below
-   - LiveTopBar: back arrow button, pulsing "● LIVE" red badge, "👁 {viewerCount}" display
-   - LiveControls: row of circular buttons — "End Live" (red), mic toggle, flip camera, chat toggle
-   - ErrorOverlay: Camera icon, "Camera access required" text, "Enable Camera" button (retries startCamera)
-
-2. Update `App.tsx`:
-   - Import `NewLiveStreamScreen` instead of `LiveVerticalSetupPage`
-   - In `vertical-setup` case: render `<NewLiveStreamScreen streamId={...} onBack={...} onGoLive={...} />`
-
-3. Update `CreateModal.tsx` (GoLiveSlide):
-   - When slide 2 is active (`isActive` prop), start camera immediately (same pattern as ShortsSlide)
-   - Replace the dark `rgba(0,0,0,0.88)` countdown overlay with a camera-preview-based layout: the camera `<video>` stays mounted, countdown number is absolute overlay
-   - The GoLiveSlide should have its own `videoRef`, `streamRef`, `cameraReady`, `cameraError` state
-   - On GO LIVE tap: trigger countdown (5→1) over the camera preview, then call `onGoLive(streamId)`
-
-4. Delete `LiveCountdownPage.tsx` entirely.
-
-5. Delete `LiveVerticalSetupPage.tsx` (replaced by `NewLiveStreamScreen.tsx`).
-
-6. Add `data-ocid` markers:
-   - `new_live.back.button`
-   - `new_live.end_live.button`
-   - `new_live.mic.toggle`
-   - `new_live.flip_camera.button`
-   - `new_live.chat.toggle`
-   - `new_live.go_live.primary_button`
-   - `new_live.enable_camera.button`
-   - `new_live.countdown.panel`
+1. Create `LiveDiscoveryPage.tsx` — scrollable live feed with mock data, auto-refresh, Join navigation
+2. Update `App.tsx` — wire "live" tab to show `LiveDiscoveryPage`; handle join nav to camera-screen
+3. Update `NewLiveStreamScreen.tsx`:
+   a. Add chat message list (scrollable, above input, simulated incoming messages)
+   b. Update top bar (avatar, username, coin counter)
+   c. Add Battle/CoHost/Mod buttons to icon row
+   d. Expand gift button to open GiftPickerPanel
+   e. Add BattlePanel overlay
+   f. Add CoHostPanel overlay
+   g. Add ModeratorPanel overlay
+   h. Add GiftPickerPanel bottom sheet
+   i. Add gift fly animation overlay
+4. Validate (typecheck + lint + build)

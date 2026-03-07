@@ -8,7 +8,6 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import { useState } from "react";
-import { LiveSetupPanel } from "../components/LiveSetupPanel";
 
 interface ShortsCreatePageProps {
   onBack: () => void;
@@ -56,7 +55,6 @@ export default function ShortsCreatePage({
   onGoLive,
 }: ShortsCreatePageProps) {
   const [activeTab, setActiveTab] = useState<Tab>("camera");
-  const [liveSetupOpen, setLiveSetupOpen] = useState(false);
 
   const tabs: {
     id: Tab;
@@ -71,9 +69,6 @@ export default function ShortsCreatePage({
 
   const handleTabChange = (tab: Tab) => {
     setActiveTab(tab);
-    if (tab === "live") {
-      setLiveSetupOpen(true);
-    }
   };
 
   return (
@@ -309,7 +304,7 @@ export default function ShortsCreatePage({
             <button
               type="button"
               data-ocid="shorts_create.go_live.primary_button"
-              onClick={() => setLiveSetupOpen(true)}
+              onClick={() => onGoLive(BigInt(Date.now()))}
               className="flex items-center gap-2 px-8 py-3.5 rounded-full font-bold text-white text-sm"
               style={{
                 background: "#FF2D2D",
@@ -320,24 +315,11 @@ export default function ShortsCreatePage({
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
                 <span className="relative inline-flex rounded-full w-2.5 h-2.5 bg-white" />
               </span>
-              Set Up Live Stream
+              Go Live
             </button>
           </motion.div>
         )}
       </div>
-
-      {/* Live Setup Panel */}
-      <LiveSetupPanel
-        open={liveSetupOpen}
-        onClose={() => {
-          setLiveSetupOpen(false);
-          if (activeTab === "live") setActiveTab("camera");
-        }}
-        onGoLive={(streamId) => {
-          setLiveSetupOpen(false);
-          onGoLive(streamId);
-        }}
-      />
     </div>
   );
 }

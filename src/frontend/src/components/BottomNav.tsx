@@ -1,7 +1,7 @@
-import { Clock, Home, Plus, User, Zap } from "lucide-react";
+import { Clock, Home, Plus, Radio, User, Zap } from "lucide-react";
 import { motion } from "motion/react";
 
-export type TabId = "home" | "shorts" | "history" | "profile";
+export type TabId = "home" | "shorts" | "live" | "history" | "profile";
 
 interface BottomNavProps {
   activeTab: TabId;
@@ -46,6 +46,7 @@ export function BottomNav({
     ocid: string,
   ) => {
     const isActive = activeTab === id;
+    const isLiveTab = id === "live";
     return (
       <button
         key={id}
@@ -70,10 +71,24 @@ export function BottomNav({
           transition={{ type: "spring", stiffness: 400, damping: 30 }}
           className="relative"
         >
-          <Icon
-            className={`w-4 h-4 transition-colors duration-200 ${isActive ? "text-[#FF2D2D]" : "text-gray-500"}`}
-            strokeWidth={isActive ? 2.5 : 2}
-          />
+          {isLiveTab && isActive ? (
+            <span className="relative flex h-4 w-4 items-center justify-center">
+              <span
+                className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-40"
+                style={{ background: "#FF2D2D" }}
+              />
+              <Icon
+                className="w-4 h-4 relative"
+                style={{ color: "#FF2D2D" }}
+                strokeWidth={2.5}
+              />
+            </span>
+          ) : (
+            <Icon
+              className={`w-4 h-4 transition-colors duration-200 ${isActive ? "text-[#FF2D2D]" : "text-gray-500"}`}
+              strokeWidth={isActive ? 2.5 : 2}
+            />
+          )}
         </motion.div>
         <motion.span
           animate={{ color: isActive ? "#FF2D2D" : "#6b7280" }}
@@ -158,8 +173,9 @@ export function BottomNav({
           </motion.button>
         </div>
 
-        {/* Right group: History, Profile */}
+        {/* Right group: Live, History, Profile — 3 tabs split across right side */}
         <div className="flex flex-1 items-stretch justify-end">
+          {renderTab("live", "Live", Radio, "nav.live.link")}
           {rightTabs.map(({ id, label, icon: Icon, ocid }) =>
             renderTab(id, label, Icon, ocid),
           )}

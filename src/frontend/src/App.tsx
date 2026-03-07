@@ -11,16 +11,11 @@ import { useInternetIdentity } from "./hooks/useInternetIdentity";
 import { useGetCallerUserProfile } from "./hooks/useQueries";
 import { LanguageProvider } from "./i18n/LanguageContext";
 import AdminDashboardPage from "./pages/AdminDashboardPage";
-import BattleHistoryPage from "./pages/BattleHistoryPage";
 import HistoryPage from "./pages/HistoryPage";
 import HomePage from "./pages/HomePage";
-import LiveAnalyticsPage from "./pages/LiveAnalyticsPage";
-// LiveCountdownPage removed — countdown is now an overlay inside LiveVerticalSetupPage
-import LivePage from "./pages/LivePage";
-import LiveReplayPage from "./pages/LiveReplayPage";
-import LiveVerticalSetupPage from "./pages/LiveVerticalSetupPage";
-import LiveWatchPage from "./pages/LiveWatchPage";
+import LiveDiscoveryPage from "./pages/LiveDiscoveryPage";
 import LoginPage from "./pages/LoginPage";
+import NewLiveStreamScreen from "./pages/NewLiveStreamScreen";
 import ProfilePage from "./pages/ProfilePage";
 import PublicCreatorProfilePage from "./pages/PublicCreatorProfilePage";
 import RechargePage from "./pages/RechargePage";
@@ -28,28 +23,12 @@ import SetupProfilePage from "./pages/SetupProfilePage";
 import ShortsCreatePage from "./pages/ShortsCreatePage";
 import ShortsPage from "./pages/ShortsPage";
 import WalletPage from "./pages/WalletPage";
-import WeeklyLeaderboardPage from "./pages/WeeklyLeaderboardPage";
 import WithdrawPage from "./pages/WithdrawPage";
 import { updateActiveStatus } from "./utils/activeStatus";
 
 // ─── Sub-route types ──────────────────────────────────────────────────────────
 
-type LiveSubRoute =
-  | { type: "setup" }
-  | { type: "vertical-setup"; streamId: bigint }
-  | {
-      type: "watch";
-      streamId: bigint;
-      isCreator?: boolean;
-      streamTitle?: string;
-      /** True when the creator just finished the Go Live countdown — skip connecting delay */
-      cameFromSetup?: boolean;
-    }
-  | { type: "analytics"; streamId: bigint }
-  | { type: "replay"; streamId: bigint }
-  | { type: "battle-history" }
-  | { type: "weekly-leaderboard" }
-  | null;
+type LiveSubRoute = { type: "camera-screen"; streamId: bigint } | null;
 
 type ShortsSubRoute = { type: "create" } | null;
 
@@ -188,7 +167,7 @@ function AppInner() {
   const isFullScreenRoute =
     creatorProfileRoute !== null ||
     walletSubRoute !== null ||
-    (liveSubRoute !== null && liveSubRoute.type !== "setup") ||
+    liveSubRoute !== null ||
     (activeTab === "shorts" && shortsSubRoute !== null) ||
     showCreateModal;
 
@@ -250,7 +229,7 @@ function AppInner() {
           onBack={() => setShortsSubRoute(null)}
           onGoLive={(streamId) => {
             setShortsSubRoute(null);
-            setLiveSubRoute({ type: "vertical-setup", streamId });
+            setLiveSubRoute({ type: "camera-screen", streamId });
           }}
         />
       );
@@ -258,109 +237,14 @@ function AppInner() {
 
     // LIVE sub-routes — tab-agnostic: check liveSubRoute first
     if (liveSubRoute !== null) {
-      switch (liveSubRoute.type) {
-        case "setup":
-          return (
-            <LivePage
-              key="live-setup"
-              onNavigateToWatch={(streamId) =>
-                setLiveSubRoute({ type: "watch", streamId, isCreator: false })
-              }
-              onNavigateToSetup={() =>
-                setLiveSubRoute({
-                  type: "vertical-setup",
-                  streamId: BigInt(Date.now()),
-                })
-              }
-            />
-          );
-
-        case "vertical-setup":
-          return (
-            // Countdown is now an overlay inside LiveVerticalSetupPage.
-            // The camera <video> element stays mounted through the entire
-            // countdown so there is no black-screen flash on transition.
-            <LiveVerticalSetupPage
-              key="live-vertical-setup"
-              streamId={liveSubRoute.streamId}
-              onBack={() => setLiveSubRoute(null)}
-              onGoLive={() =>
-                setLiveSubRoute({
-                  type: "watch",
-                  streamId: liveSubRoute.streamId,
-                  isCreator: true,
-                  cameFromSetup: true,
-                })
-              }
-            />
-          );
-
-        // "countdown" case is intentionally removed — handled as an overlay
-        // inside LiveVerticalSetupPage to prevent video element unmounting.
-
-        case "watch":
-          return (
-            <LiveWatchPage
-              key={`live-watch-${liveSubRoute.streamId.toString()}`}
-              streamId={liveSubRoute.streamId}
-              isCreator={liveSubRoute.isCreator ?? false}
-              isCreatorGoingLive={liveSubRoute.cameFromSetup ?? false}
-              streamTitle={liveSubRoute.streamTitle}
-              onBack={() => setLiveSubRoute(null)}
-              onEndStream={() =>
-                setLiveSubRoute({
-                  type: "analytics",
-                  streamId: liveSubRoute.streamId,
-                })
-              }
-              onNavigateToWallet={() => {
-                setLiveSubRoute(null);
-                setWalletSubRoute("main");
-              }}
-              onBattleHistory={() =>
-                setLiveSubRoute({ type: "battle-history" })
-              }
-              onWeeklyLeaderboard={() =>
-                setLiveSubRoute({ type: "weekly-leaderboard" })
-              }
-            />
-          );
-
-        case "analytics":
-          return (
-            <LiveAnalyticsPage
-              key="live-analytics"
-              streamId={liveSubRoute.streamId}
-              onBack={() => setLiveSubRoute(null)}
-              onDelete={() => setLiveSubRoute(null)}
-            />
-          );
-
-        case "replay":
-          return (
-            <LiveReplayPage
-              key="live-replay"
-              streamId={liveSubRoute.streamId}
-              onBack={() => setLiveSubRoute(null)}
-            />
-          );
-
-        case "battle-history":
-          return (
-            <BattleHistoryPage
-              key="battle-history"
-              onBack={() => setLiveSubRoute(null)}
-            />
-          );
-
-        case "weekly-leaderboard":
-          return (
-            <WeeklyLeaderboardPage
-              key="weekly-leaderboard"
-              onBack={() => setLiveSubRoute(null)}
-            />
-          );
-      }
+      return (
+        <NewLiveStreamScreen
+          key={`live-camera-${liveSubRoute.streamId.toString()}`}
+          streamId={liveSubRoute.streamId}
+          onBack={() => setLiveSubRoute(null)}
+          onGoLive={() => {}}
+        />
+      );
     }
 
     // Default tab pages
@@ -379,6 +263,15 @@ function AppInner() {
           <ShortsPage
             key="shorts"
             onGoLive={() => setShortsSubRoute({ type: "create" })}
+          />
+        );
+      case "live":
+        return (
+          <LiveDiscoveryPage
+            key="live-discovery"
+            onJoinStream={(streamId) => {
+              setLiveSubRoute({ type: "camera-screen", streamId });
+            }}
           />
         );
       case "history":
@@ -459,15 +352,7 @@ function AppInner() {
           }}
           onGoLive={(streamId) => {
             setShowCreateModal(false);
-            // vertical-setup shows the countdown overlay; after countdown,
-            // onGoLive fires and we transition directly to "watch" as the creator.
-            // cameFromSetup=true skips the 3-second "connecting" delay in LiveWatchPage.
-            setLiveSubRoute({
-              type: "watch",
-              streamId,
-              isCreator: true,
-              cameFromSetup: true,
-            });
+            setLiveSubRoute({ type: "camera-screen", streamId });
           }}
         />
       )}
