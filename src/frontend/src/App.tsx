@@ -256,6 +256,8 @@ function AppInner() {
             onCreatorClick={(principalId) =>
               setCreatorProfileRoute({ principalId })
             }
+            onProfileTab={() => navigateToTab("profile")}
+            onLogout={() => navigateToTab("profile")}
           />
         );
       case "shorts":
@@ -285,7 +287,13 @@ function AppInner() {
           />
         );
       default:
-        return <HomePage key="home" />;
+        return (
+          <HomePage
+            key="home"
+            onProfileTab={() => navigateToTab("profile")}
+            onLogout={() => navigateToTab("profile")}
+          />
+        );
     }
   };
 

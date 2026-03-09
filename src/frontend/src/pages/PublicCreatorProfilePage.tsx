@@ -13,6 +13,7 @@ import {
   Trophy,
   UserCheck,
   UserPlus,
+  Users,
   Zap,
 } from "lucide-react";
 import { motion } from "motion/react";
@@ -21,10 +22,18 @@ import { toast } from "sonner";
 import type { VideoPost } from "../backend.d";
 import { VideoPlayerModal } from "../components/VideoPlayerModal";
 import { useActor } from "../hooks/useActor";
+import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import {
+  useGetUsername,
   useGetUsernameByPrincipal,
   useListVideoPosts,
 } from "../hooks/useQueries";
+import {
+  addNotification,
+  decrementFollowerCount,
+  getFollowerCount,
+  incrementFollowerCount,
+} from "../utils/notificationStore";
 
 // ─── Avatar gradient (same array as UserProfileModal) ─────────────────────────
 const AVATAR_GRADIENTS = [
@@ -164,6 +173,8 @@ export default function PublicCreatorProfilePage({
   onBack,
 }: PublicCreatorProfilePageProps) {
   const { actor } = useActor();
+  const { identity } = useInternetIdentity();
+  const myUserId = identity?.getPrincipal().toString() ?? "";
 
   // Resolve principal object
   const principal = useMemo(() => {
@@ -178,6 +189,9 @@ export default function PublicCreatorProfilePage({
   const { data: username, isLoading: usernameLoading } =
     useGetUsernameByPrincipal(principal ?? undefined);
 
+  // My own username (for notification message)
+  const { data: myUsername } = useGetUsername();
+
   // Fetch all videos, filter by uploader
   const { data: allVideos, isLoading: videosLoading } = useListVideoPosts();
   const creatorVideos = useMemo(
@@ -191,13 +205,16 @@ export default function PublicCreatorProfilePage({
   const [followLoading, setFollowLoading] = useState(false);
   const [followChecked, setFollowChecked] = useState(false);
 
+  // Follower count from localStorage
+  const [followerCount, setFollowerCount] = useState(0);
+
   // Battle stats
   const [battleStats, setBattleStats] = useState<BattleStats | null>(null);
 
   // Selected video for player
   const [selectedVideo, setSelectedVideo] = useState<VideoPost | null>(null);
 
-  // Load initial follow state + battle stats
+  // Load initial follow state + battle stats + follower count
   useEffect(() => {
     if (!actor || !principal || followChecked) return;
     void (async () => {
@@ -210,6 +227,7 @@ export default function PublicCreatorProfilePage({
       setFollowChecked(true);
     })();
     setBattleStats(loadBattleStats(principalId));
+    setFollowerCount(getFollowerCount(principalId));
   }, [actor, principal, principalId, followChecked]);
 
   const handleFollowToggle = useCallback(async () => {
@@ -219,18 +237,41 @@ export default function PublicCreatorProfilePage({
       if (isFollowing) {
         await actor.unfollowCreator(principal);
         setIsFollowing(false);
-        toast.success("Unfollowed");
+        decrementFollowerCount(principalId);
+        setFollowerCount((c) => Math.max(0, c - 1));
+        toast.success("Unsubscribed");
       } else {
         await actor.followCreator(principal);
         setIsFollowing(true);
-        toast.success("Following!");
+        incrementFollowerCount(principalId);
+        setFollowerCount((c) => c + 1);
+        toast.success("Subscribed!");
+
+        // Notify the creator about new follower (only if not self)
+        if (principalId !== myUserId) {
+          const followerName = myUsername ?? myUserId.slice(0, 8);
+          addNotification(principalId, {
+            type: "follow",
+            title: "New Follower",
+            message: `@${followerName} started following you.`,
+            actorUsername: followerName,
+          });
+        }
       }
     } catch {
-      toast.error("Could not update follow status");
+      toast.error("Could not update subscription status");
     } finally {
       setFollowLoading(false);
     }
-  }, [actor, principal, isFollowing, followLoading]);
+  }, [
+    actor,
+    principal,
+    isFollowing,
+    followLoading,
+    principalId,
+    myUserId,
+    myUsername,
+  ]);
 
   const displayUsername = username ?? `${principalId.slice(0, 8)}…`;
   const gradient = avatarGradient(displayUsername);
@@ -353,7 +394,7 @@ export default function PublicCreatorProfilePage({
               </div>
             )}
 
-            {/* Follow button */}
+            {/* Subscribe button */}
             <button
               type="button"
               onClick={() => void handleFollowToggle()}
@@ -373,15 +414,52 @@ export default function PublicCreatorProfilePage({
               ) : isFollowing ? (
                 <>
                   <UserCheck className="w-4 h-4" />
-                  Following
+                  Subscribed
                 </>
               ) : (
                 <>
                   <UserPlus className="w-4 h-4" />
-                  Follow
+                  Subscribe
                 </>
               )}
             </button>
+
+            {/* Stats row: Videos / Followers */}
+            <div className="flex items-center gap-6 mt-2">
+              <div className="flex flex-col items-center gap-0.5">
+                <span className="text-white font-black text-lg leading-none">
+                  {creatorVideos.length}
+                </span>
+                <span
+                  className="text-[11px] font-medium"
+                  style={{ color: "#666" }}
+                >
+                  Videos
+                </span>
+              </div>
+              <div className="h-8 w-px" style={{ background: "#242424" }} />
+              <div className="flex flex-col items-center gap-0.5">
+                <span className="text-white font-black text-lg leading-none">
+                  {followerCount}
+                </span>
+                <span
+                  className="text-[11px] font-medium"
+                  style={{ color: "#666" }}
+                >
+                  Followers
+                </span>
+              </div>
+              <div className="h-8 w-px" style={{ background: "#242424" }} />
+              <div className="flex flex-col items-center gap-0.5">
+                <Users className="w-4 h-4 mb-0.5" style={{ color: "#666" }} />
+                <span
+                  className="text-[11px] font-medium"
+                  style={{ color: "#666" }}
+                >
+                  Subscriptions
+                </span>
+              </div>
+            </div>
           </motion.div>
 
           {/* Divider */}

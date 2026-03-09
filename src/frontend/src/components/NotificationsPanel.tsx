@@ -1,9 +1,25 @@
-import { Bell, Star, User, X } from "lucide-react";
+import { Bell, Heart, Star, User, Video, X, Zap } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import {
+  formatTimeAgo,
+  getNotifications,
+  markAllRead,
+  markNotificationRead,
+} from "../utils/notificationStore";
+import type { AppNotification } from "../utils/notificationStore";
 
-export type NotificationType = "upload" | "subscription" | "premium";
+export type NotificationType =
+  | "upload"
+  | "subscription"
+  | "premium"
+  | "follow"
+  | "like"
+  | "comment"
+  | "live"
+  | "system";
 
+// Legacy interface for backward compatibility (HomePage still uses this shape)
 export interface Notification {
   id: string;
   type: NotificationType;
@@ -14,61 +30,39 @@ export interface Notification {
   videoId?: string;
 }
 
-export const DEFAULT_NOTIFICATIONS: Notification[] = [
-  {
-    id: "1",
-    type: "upload",
-    title: "New Upload",
-    message: "TechReviewer uploaded 'iPhone 16 Review'",
-    time: "2m ago",
-    read: false,
-  },
-  {
-    id: "2",
-    type: "subscription",
-    title: "New Subscriber",
-    message: "You have 3 new subscribers",
-    time: "15m ago",
-    read: false,
-  },
-  {
-    id: "3",
-    type: "premium",
-    title: "Premium Content",
-    message: "5 new premium videos available",
-    time: "1h ago",
-    read: false,
-  },
-  {
-    id: "4",
-    type: "upload",
-    title: "Trending Now",
-    message: "'The Dark Knight 4K' is trending",
-    time: "2h ago",
-    read: true,
-  },
-  {
-    id: "5",
-    type: "subscription",
-    title: "Subscription Update",
-    message: "Creator StreamVault posted new content",
-    time: "3h ago",
-    read: true,
-  },
-];
+export const DEFAULT_NOTIFICATIONS: Notification[] = [];
 
 const TYPE_STYLES: Record<
   NotificationType,
   { bg: string; text: string; Icon: typeof Bell }
 > = {
-  upload: { bg: "bg-[#FF2D2D]/15", text: "text-[#FF2D2D]", Icon: Bell },
+  upload: { bg: "bg-[#FF2D2D]/15", text: "text-[#FF2D2D]", Icon: Video },
   subscription: { bg: "bg-blue-500/15", text: "text-blue-400", Icon: User },
   premium: { bg: "bg-yellow-500/15", text: "text-yellow-400", Icon: Star },
+  follow: { bg: "bg-blue-500/15", text: "text-blue-400", Icon: User },
+  like: { bg: "bg-pink-500/15", text: "text-pink-400", Icon: Heart },
+  comment: { bg: "bg-green-500/15", text: "text-green-400", Icon: Bell },
+  live: { bg: "bg-[#FF2D2D]/15", text: "text-[#FF2D2D]", Icon: Zap },
+  system: { bg: "bg-gray-500/15", text: "text-gray-400", Icon: Bell },
 };
+
+// Convert AppNotification → legacy Notification shape for rendering
+function toRenderNotification(n: AppNotification): Notification {
+  return {
+    id: n.id,
+    type: n.type as NotificationType,
+    title: n.title,
+    message: n.message,
+    time: formatTimeAgo(n.timestamp),
+    read: n.read,
+    videoId: n.videoId,
+  };
+}
 
 interface NotificationsPanelProps {
   open: boolean;
-  notifications: Notification[];
+  notifications?: Notification[]; // legacy prop (kept for backward compat)
+  userId?: string; // new: load from store when provided
   onMarkRead: (id: string) => void;
   onMarkAllRead: () => void;
   onClose: () => void;
@@ -77,13 +71,34 @@ interface NotificationsPanelProps {
 
 export function NotificationsPanel({
   open,
-  notifications,
+  notifications: legacyNotifications,
+  userId,
   onMarkRead,
   onMarkAllRead,
   onClose,
   onVideoOpen,
 }: NotificationsPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+
+  // Local state: real notifications from store
+  const [storeNotifications, setStoreNotifications] = useState<Notification[]>(
+    [],
+  );
+
+  // Load from store on open and poll every 15 seconds
+  useEffect(() => {
+    if (!userId) return;
+
+    const load = () => {
+      const raw = getNotifications(userId);
+      setStoreNotifications(raw.map(toRenderNotification));
+    };
+
+    if (open) load();
+
+    const interval = setInterval(load, 15_000);
+    return () => clearInterval(interval);
+  }, [userId, open]);
 
   // Close on outside click
   useEffect(() => {
@@ -93,7 +108,6 @@ export function NotificationsPanel({
         onClose();
       }
     }
-    // Delay to avoid the same click that opened the panel from closing it
     const timer = setTimeout(() => {
       document.addEventListener("mousedown", handleClick);
     }, 50);
@@ -103,7 +117,31 @@ export function NotificationsPanel({
     };
   }, [open, onClose]);
 
+  // Decide which notifications to show: prefer store-based when userId provided
+  const notifications =
+    userId && storeNotifications.length > 0
+      ? storeNotifications
+      : (legacyNotifications ?? []);
+
   const unreadCount = notifications.filter((n) => !n.read).length;
+
+  const handleMarkRead = (id: string) => {
+    if (userId) {
+      markNotificationRead(userId, id);
+      setStoreNotifications((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, read: true } : n)),
+      );
+    }
+    onMarkRead(id);
+  };
+
+  const handleMarkAllRead = () => {
+    if (userId) {
+      markAllRead(userId);
+      setStoreNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    }
+    onMarkAllRead();
+  };
 
   const NOTIFICATION_OCIDS = [
     "notifications.item.1",
@@ -156,7 +194,7 @@ export function NotificationsPanel({
                   <button
                     type="button"
                     data-ocid="notifications.mark_all.button"
-                    onClick={onMarkAllRead}
+                    onClick={handleMarkAllRead}
                     className="text-xs text-[#FF2D2D] font-semibold hover:text-[#ff5555] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded px-1"
                   >
                     Mark all read
@@ -194,7 +232,8 @@ export function NotificationsPanel({
               ) : (
                 <div className="divide-y divide-white/6">
                   {notifications.map((notification, index) => {
-                    const style = TYPE_STYLES[notification.type];
+                    const style =
+                      TYPE_STYLES[notification.type] ?? TYPE_STYLES.system;
                     const Icon = style.Icon;
                     const ocid =
                       NOTIFICATION_OCIDS[index] ??
@@ -205,12 +244,8 @@ export function NotificationsPanel({
                         type="button"
                         data-ocid={ocid}
                         onClick={() => {
-                          onMarkRead(notification.id);
-                          if (
-                            notification.type === "upload" &&
-                            notification.videoId &&
-                            onVideoOpen
-                          ) {
+                          handleMarkRead(notification.id);
+                          if (notification.videoId && onVideoOpen) {
                             onVideoOpen(notification.videoId);
                             onClose();
                           }

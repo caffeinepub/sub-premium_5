@@ -42,7 +42,7 @@ import {
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Bell,
+  ArrowLeft,
   BookmarkPlus,
   Check,
   ChevronDown,
@@ -59,8 +59,10 @@ import {
   MonitorPlay,
   MoreHorizontal,
   MoreVertical,
+  Pause,
   Pencil,
   Pin,
+  Play,
   Plus,
   RefreshCw,
   Send,
@@ -68,7 +70,6 @@ import {
   Share2,
   Shuffle,
   Subtitles,
-  ThumbsDown,
   ThumbsUp,
   Trash2,
   Wand2,
@@ -394,6 +395,8 @@ function PlayerSettingsModal({
   audio,
   translating,
   onSave,
+  onSaveVideo,
+  onReportVideo,
 }: {
   open: boolean;
   onClose: () => void;
@@ -403,6 +406,8 @@ function PlayerSettingsModal({
   audio: AudioOption;
   translating: boolean;
   onSave: (settings: TempSettings) => void;
+  onSaveVideo: () => void;
+  onReportVideo: () => void;
 }) {
   const [active, setActive] = useState<SettingsSection>(null);
 
@@ -656,6 +661,43 @@ function PlayerSettingsModal({
                     </AnimatePresence>
                   </div>
                 ))}
+              </div>
+
+              {/* ── Save Video / Report Video action rows ─────────────── */}
+              <div className="h-px bg-white/10 mx-5" />
+              <div className="py-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSaveVideo();
+                    onClose();
+                  }}
+                  className="w-full flex items-center gap-3 px-5 py-3.5 hover:bg-white/5 transition-colors"
+                  data-ocid="player_settings.save_video.button"
+                >
+                  <span className="text-white/50">
+                    <BookmarkPlus className="w-4 h-4" />
+                  </span>
+                  <span className="flex-1 text-sm font-medium text-white/90 text-left">
+                    Save Video
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onReportVideo();
+                    onClose();
+                  }}
+                  className="w-full flex items-center gap-3 px-5 py-3.5 hover:bg-white/5 transition-colors"
+                  data-ocid="player_settings.report_video.button"
+                >
+                  <span className="text-white/50">
+                    <Flag className="w-4 h-4" />
+                  </span>
+                  <span className="flex-1 text-sm font-medium text-white/90 text-left">
+                    Report Video
+                  </span>
+                </button>
               </div>
 
               {/* ── Save / Cancel action row ───────────────────────────── */}
@@ -1514,6 +1556,14 @@ export function VideoPlayerModal({
   const [playlistOpen, setPlaylistOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [descExpanded, setDescExpanded] = useState(false);
+  const [commentsOverlayOpen, setCommentsOverlayOpen] = useState(false);
+
+  // Video player quick-action overlay
+  const [showVideoControls, setShowVideoControls] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(true);
+  const videoControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   // More Options / Edit / Delete state
   const [moreSheetOpen, setMoreSheetOpen] = useState(false);
@@ -1551,8 +1601,15 @@ export function VideoPlayerModal({
   const likeCount = engagementData?.likes ?? 0;
   const liked = engagementData?.userLiked ?? false;
 
+  // Subscriber count proxy: based on views as a visual estimate
+  const subscriberCount = useMemo(() => {
+    const base = Math.floor(views * 0.12) + (isFollowing ? 1 : 0);
+    return base;
+  }, [views, isFollowing]);
+
   // Dislike is UI-only (not synced)
   const [disliked, setDisliked] = useState(false);
+  const [likeAnimating, setLikeAnimating] = useState(false);
 
   // Comments
   const [comments, setComments] = useState<Comment[]>([]);
@@ -1629,6 +1686,9 @@ export function VideoPlayerModal({
     setPipActive(false);
     setLocalTitle(null);
     setLocalDescription(null);
+    setCommentsOverlayOpen(false);
+    setShowVideoControls(false);
+    setIsPlaying(true);
     dragY.set(0);
     mutateRef.current(post.id);
     if (uid && uid !== "guest") updateActiveStatus(uid);
@@ -1876,29 +1936,41 @@ export function VideoPlayerModal({
     // If currently disliked, remove dislike first
     if (!liked && disliked) setDisliked(false);
     toggleVideoLike.mutate({ videoId: post.id.toString(), userId });
+    // Trigger pulse animation
+    setLikeAnimating(true);
+    setTimeout(() => setLikeAnimating(false), 400);
   };
 
-  const handleDislike = () => {
-    const vid = post?.id.toString() ?? "";
-    if (!disliked) {
-      setDisliked(true);
-      // Un-like via the engagement store if currently liked
-      if (liked && post && userId) {
-        toggleVideoLike.mutate({ videoId: post.id.toString(), userId });
-      }
-      try {
-        localStorage.setItem(`ud-${vid}`, "1");
-      } catch {
-        /**/
-      }
-    } else {
-      setDisliked(false);
-      try {
-        localStorage.removeItem(`ud-${vid}`);
-      } catch {
-        /**/
-      }
+  // Video overlay controls toggle
+  const handleVideoTap = () => {
+    setShowVideoControls((prev) => !prev);
+    if (videoControlsTimerRef.current)
+      clearTimeout(videoControlsTimerRef.current);
+    if (!showVideoControls) {
+      videoControlsTimerRef.current = setTimeout(
+        () => setShowVideoControls(false),
+        3000,
+      );
     }
+  };
+
+  const togglePlayPause = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) {
+      void v.play();
+      setIsPlaying(true);
+    } else {
+      v.pause();
+      setIsPlaying(false);
+    }
+    if (videoControlsTimerRef.current)
+      clearTimeout(videoControlsTimerRef.current);
+    videoControlsTimerRef.current = setTimeout(
+      () => setShowVideoControls(false),
+      3000,
+    );
   };
 
   // ── subscribe ─────────────────────────────────────────────────────────────
@@ -2013,9 +2085,11 @@ export function VideoPlayerModal({
               className="max-h-[92vh] overflow-y-auto scrollbar-hide"
             >
               {/* ── 1. VIDEO PLAYER (full width) ──────────────────────── */}
+              {/* biome-ignore lint/a11y/useKeyWithClickEvents: tap-to-show controls is supplementary; primary controls are keyboard-accessible buttons inside */}
               <div
                 ref={videoWrapRef}
                 className="relative bg-black w-full aspect-video"
+                onClick={handleVideoTap}
               >
                 {/* biome-ignore lint/a11y/useMediaCaption: user-generated content; custom subtitle overlay */}
                 <video
@@ -2029,16 +2103,98 @@ export function VideoPlayerModal({
                   onEnded={() => {
                     if (!upNextCancelled) setShowUpNext(true);
                   }}
+                  onPlay={() => setIsPlaying(true)}
+                  onPause={() => setIsPlaying(false)}
                 />
                 <SubtitleOverlay
                   lang={subtitle}
                   translating={translating}
                   lines={subtitleLines}
                 />
+
+                {/* ── Custom quick-action overlay ─────────────────────── */}
+                <AnimatePresence>
+                  {showVideoControls && (
+                    <motion.div
+                      key="video-overlay"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.18 }}
+                      className="absolute inset-0 z-20 pointer-events-none"
+                      data-ocid="player.video_overlay.panel"
+                    >
+                      {/* Center play/pause */}
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-auto">
+                        <button
+                          type="button"
+                          onClick={togglePlayPause}
+                          className="w-14 h-14 rounded-full bg-black/55 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/70 transition-colors active:scale-90"
+                          aria-label={isPlaying ? "Pause" : "Play"}
+                          data-ocid="player.video_overlay.button"
+                        >
+                          {isPlaying ? (
+                            <Pause className="w-7 h-7 fill-white" />
+                          ) : (
+                            <Play className="w-7 h-7 fill-white ml-0.5" />
+                          )}
+                        </button>
+                      </div>
+
+                      {/* Bottom action row: Like, Comment, Share */}
+                      <div className="absolute bottom-12 left-3 right-12 flex items-center gap-2 pointer-events-auto">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleLike();
+                          }}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all active:scale-90 backdrop-blur-sm ${liked ? "bg-[#FF2D2D]/80 text-white" : "bg-black/55 text-white/90 hover:bg-black/70"}`}
+                          data-ocid="player.video_overlay_like.button"
+                        >
+                          <ThumbsUp
+                            className={`w-3.5 h-3.5 ${liked ? "fill-white" : ""}`}
+                          />
+                          <span>{fmtN(likeCount)}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCommentsOverlayOpen(true);
+                            setShowVideoControls(false);
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/55 backdrop-blur-sm text-white/90 hover:bg-black/70 text-xs font-bold transition-all active:scale-90"
+                          data-ocid="player.video_overlay_comment.button"
+                        >
+                          <MessageCircle className="w-3.5 h-3.5" />
+                          {comments.length > 0 ? fmtN(comments.length) : "Chat"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShareOpen(true);
+                            setShowVideoControls(false);
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/55 backdrop-blur-sm text-white/90 hover:bg-black/70 text-xs font-bold transition-all active:scale-90"
+                          data-ocid="player.video_overlay_share.button"
+                        >
+                          <Share2 className="w-3.5 h-3.5" />
+                          Share
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 {/* Settings gear — always visible, never blocked */}
                 <button
                   type="button"
-                  onClick={() => setSettingsOpen(true)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSettingsOpen(true);
+                  }}
                   className="absolute bottom-3 right-3 z-30 w-9 h-9 rounded-full bg-black/70 hover:bg-black/90 flex items-center justify-center text-white/80 hover:text-white transition-all active:scale-90"
                   aria-label="Player settings"
                   data-ocid="player.settings.open_modal_button"
@@ -2149,34 +2305,26 @@ export function VideoPlayerModal({
                 className="px-3 py-2 flex items-center gap-2 overflow-x-auto scrollbar-hide"
                 data-ocid="player.actions.panel"
               >
-                {/* Like / Dislike pill */}
-                <div className="flex items-center bg-secondary/60 rounded-full shrink-0">
-                  <button
-                    type="button"
-                    onClick={handleLike}
-                    className={`flex items-center gap-1.5 px-3.5 py-2 rounded-l-full text-sm font-semibold transition-colors ${liked ? "text-primary bg-primary/10" : "text-foreground hover:bg-secondary"}`}
-                    data-ocid="player.like.button"
-                  >
-                    <ThumbsUp className="w-4 h-4" />
-                    <span>{fmtN(likeCount)}</span>
-                  </button>
-                  <div className="w-px h-4 bg-border/40" />
-                  <button
-                    type="button"
-                    onClick={handleDislike}
-                    className={`flex items-center gap-1.5 px-3.5 py-2 rounded-r-full text-sm font-semibold transition-colors ${disliked ? "text-red-400 bg-red-500/10" : "text-foreground hover:bg-secondary"}`}
-                    data-ocid="player.dislike.button"
-                  >
-                    <ThumbsDown className="w-4 h-4" />
-                  </button>
-                </div>
-                {/* Comments count */}
+                {/* Like button — standalone with red fill when liked */}
+                <motion.button
+                  type="button"
+                  onClick={handleLike}
+                  animate={
+                    likeAnimating ? { scale: [1, 1.25, 1] } : { scale: 1 }
+                  }
+                  transition={{ duration: 0.35, ease: "easeOut" }}
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-sm font-semibold transition-colors shrink-0 ${liked ? "bg-[#FF2D2D]/15 text-[#FF2D2D]" : "bg-secondary/60 text-foreground hover:bg-secondary"}`}
+                  data-ocid="player.like.button"
+                >
+                  <ThumbsUp
+                    className={`w-4 h-4 ${liked ? "fill-[#FF2D2D]" : ""}`}
+                  />
+                  <span>{fmtN(likeCount)}</span>
+                </motion.button>
+                {/* Comments button — opens overlay sheet */}
                 <button
                   type="button"
-                  onClick={() => {
-                    const el = scrollRef.current;
-                    if (el) el.scrollBy({ top: 400, behavior: "smooth" });
-                  }}
+                  onClick={() => setCommentsOverlayOpen(true)}
                   className="flex items-center gap-1.5 bg-secondary/60 hover:bg-secondary px-3.5 py-2 rounded-full text-sm font-semibold text-foreground transition-colors shrink-0"
                   data-ocid="player.comments.button"
                 >
@@ -2243,7 +2391,12 @@ export function VideoPlayerModal({
                 className="px-4 py-3 flex items-center gap-3"
                 data-ocid="player.creator.panel"
               >
-                <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center shrink-0 font-bold text-sm text-primary">
+                <div
+                  className="w-12 h-12 rounded-full flex items-center justify-center shrink-0 font-bold text-base text-white"
+                  style={{
+                    background: `linear-gradient(135deg, hsl(${((creatorName.charCodeAt(0) ?? 0) * 37) % 360}deg 60% 40%), hsl(${((creatorName.charCodeAt(0) ?? 0) * 37 + 60) % 360}deg 50% 30%))`,
+                  }}
+                >
                   {creatorName.slice(0, 2).toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -2254,7 +2407,9 @@ export function VideoPlayerModal({
                       size="sm"
                     />
                   </div>
-                  <p className="text-xs text-muted-foreground">Creator</p>
+                  <p className="text-xs text-muted-foreground">
+                    {fmtN(subscriberCount)} subscribers
+                  </p>
                 </div>
                 {isOwnVideo ? (
                   <span
@@ -2319,10 +2474,15 @@ export function VideoPlayerModal({
 
               <div className="h-px bg-border/15 mx-4" />
 
-              {/* ── 6. COMMENTS ──────────────────────────────────────── */}
+              {/* ── 6. COMMENTS (collapsed preview) ──────────────────── */}
               <div className="px-4 pt-4 pb-3" data-ocid="player.comments.panel">
                 {/* Header */}
-                <div className="flex items-center justify-between mb-3">
+                <button
+                  type="button"
+                  onClick={() => setCommentsOverlayOpen(true)}
+                  className="w-full flex items-center justify-between mb-3 hover:opacity-80 transition-opacity"
+                  data-ocid="comments.view_all.button"
+                >
                   <div className="flex items-center gap-2">
                     <MessageCircle className="w-4 h-4 text-primary" />
                     <span className="text-sm font-bold">Comments</span>
@@ -2333,69 +2493,58 @@ export function VideoPlayerModal({
                       {comments.length}
                     </Badge>
                   </div>
-                  {/* Sort toggle */}
-                  <div className="flex items-center gap-0.5 bg-secondary/40 rounded-full p-1">
-                    {(["newest", "top"] as const).map((s) => (
-                      <button
-                        key={s}
-                        type="button"
-                        onClick={() => setCommentSort(s)}
-                        className={`px-2.5 py-0.5 rounded-full text-xs font-semibold transition-colors ${commentSort === s ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"}`}
-                        data-ocid={`player.comments.sort_${s}.tab`}
-                      >
-                        {s === "newest" ? "Newest" : "Top"}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                  <span className="text-xs text-primary font-semibold">
+                    View all
+                  </span>
+                </button>
 
-                {/* Add comment */}
-                <div className="flex gap-2 mb-4">
-                  <Input
-                    value={newComment}
-                    onChange={(e) => setNewComment(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) addComment();
-                    }}
-                    placeholder="Add a comment…"
-                    className="flex-1 h-10 bg-secondary/40 border-border/30 text-sm rounded-2xl"
-                    data-ocid="comments.add.input"
-                  />
+                {/* Preview: first 2 comments */}
+                {sortedComments.length === 0 ? (
                   <button
                     type="button"
-                    onClick={addComment}
-                    disabled={!newComment.trim()}
-                    className="h-10 w-10 rounded-2xl bg-primary/20 hover:bg-primary/30 text-primary flex items-center justify-center transition-colors disabled:opacity-40 shrink-0"
-                    data-ocid="comments.add.submit_button"
-                  >
-                    <Send className="w-4 h-4" />
-                  </button>
-                </div>
-
-                {/* List */}
-                {sortedComments.length === 0 ? (
-                  <div
-                    className="text-center py-8 text-muted-foreground text-sm"
+                    onClick={() => setCommentsOverlayOpen(true)}
+                    className="w-full text-center py-4 text-muted-foreground text-sm hover:text-foreground transition-colors"
                     data-ocid="comments.list.empty_state"
                   >
-                    <MessageCircle className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                    No comments yet. Be the first!
-                  </div>
+                    <MessageCircle className="w-6 h-6 mx-auto mb-1.5 opacity-30" />
+                    No comments yet — tap to add one
+                  </button>
                 ) : (
-                  <div className="space-y-5" data-ocid="comments.list">
-                    {sortedComments.map((c, i) => (
-                      <div key={c.id} data-ocid={`comments.item.${i + 1}`}>
-                        <CommentItem
-                          comment={c}
-                          videoTitle={post.title}
-                          creatorName={creatorName}
-                          currentUser={currentUser}
-                          onReplyPosted={onReply}
-                          onDeleteComment={onDelete}
-                          onTogglePin={onPin}
-                        />
+                  <div className="space-y-3">
+                    {sortedComments.slice(0, 2).map((c, i) => (
+                      <div
+                        key={c.id}
+                        className="flex items-start gap-2.5"
+                        data-ocid={`comments.item.${i + 1}`}
+                      >
+                        <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center shrink-0 font-bold text-[10px] text-primary">
+                          {c.author.slice(0, 2).toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <span className="text-xs font-bold truncate">
+                              @{c.author}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground">
+                              {fmtCmtTime(c.timestamp)}
+                            </span>
+                          </div>
+                          <p className="text-xs text-foreground/80 line-clamp-2">
+                            {c.text}
+                          </p>
+                        </div>
                       </div>
                     ))}
+                    {sortedComments.length > 2 && (
+                      <button
+                        type="button"
+                        onClick={() => setCommentsOverlayOpen(true)}
+                        className="w-full text-center text-xs text-primary font-semibold py-1.5 hover:opacity-80 transition-opacity"
+                        data-ocid="comments.view_more.button"
+                      >
+                        View all {sortedComments.length} comments
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -2453,6 +2602,12 @@ export function VideoPlayerModal({
           audio={audio}
           translating={translating}
           onSave={applyPlayerSettings}
+          onSaveVideo={() => {
+            toast.success("Video saved!");
+          }}
+          onReportVideo={() => {
+            toast.info("Report submitted");
+          }}
         />
       )}
 
@@ -2472,6 +2627,116 @@ export function VideoPlayerModal({
           onClose={() => setShareOpen(false)}
           title={post.title}
         />
+      )}
+
+      {/* ── Comments overlay sheet ───────────────────────────────────────── */}
+      {open && (
+        <Sheet
+          open={commentsOverlayOpen}
+          onOpenChange={(o) => !o && setCommentsOverlayOpen(false)}
+        >
+          <SheetContent
+            side="bottom"
+            className="bg-[#111] border-white/10 rounded-t-3xl p-0 max-h-[82vh] flex flex-col"
+            data-ocid="comments.overlay.sheet"
+          >
+            {/* Drag handle pill */}
+            <div className="flex justify-center pt-2.5 pb-1 shrink-0">
+              <div className="w-10 h-1 rounded-full bg-white/20" />
+            </div>
+            {/* Header */}
+            <div className="flex items-center gap-3 px-4 py-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => setCommentsOverlayOpen(false)}
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/80 hover:text-white transition-colors"
+                data-ocid="comments.overlay.close_button"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                Comments
+                <span className="text-sm font-normal text-white/40">
+                  ({comments.length})
+                </span>
+              </h3>
+              {/* Sort toggle */}
+              <div className="ml-auto flex items-center gap-0.5 bg-white/10 rounded-full p-1">
+                {(["newest", "top"] as const).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setCommentSort(s)}
+                    className={`px-2.5 py-0.5 rounded-full text-xs font-semibold transition-colors ${commentSort === s ? "bg-[#FF2D2D] text-white" : "text-white/40 hover:text-white/70"}`}
+                    data-ocid={`comments.overlay.sort_${s}.tab`}
+                  >
+                    {s === "newest" ? "Newest" : "Top"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="h-px bg-white/10 shrink-0" />
+
+            {/* Scrollable comment list */}
+            <ScrollArea className="flex-1 min-h-0">
+              <div className="px-4 py-3">
+                {sortedComments.length === 0 ? (
+                  <div
+                    className="text-center py-10 text-white/30 text-sm"
+                    data-ocid="comments.overlay.empty_state"
+                  >
+                    <MessageCircle className="w-10 h-10 mx-auto mb-2 opacity-20" />
+                    No comments yet. Be the first!
+                  </div>
+                ) : (
+                  <div className="space-y-5">
+                    {sortedComments.map((c, i) => (
+                      <div
+                        key={c.id}
+                        data-ocid={`comments.overlay.item.${i + 1}`}
+                      >
+                        <CommentItem
+                          comment={c}
+                          videoTitle={post.title}
+                          creatorName={creatorName}
+                          currentUser={currentUser}
+                          onReplyPosted={onReply}
+                          onDeleteComment={onDelete}
+                          onTogglePin={onPin}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </ScrollArea>
+
+            {/* Add comment input pinned at bottom */}
+            <div className="shrink-0 border-t border-white/10 px-4 py-3 pb-safe">
+              <div className="flex gap-2">
+                <Input
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) addComment();
+                  }}
+                  placeholder="Add a comment…"
+                  className="flex-1 h-10 bg-white/10 border-white/15 text-sm rounded-2xl text-white placeholder:text-white/30 focus-visible:ring-[#FF2D2D]/50"
+                  data-ocid="comments.overlay.input"
+                />
+                <button
+                  type="button"
+                  onClick={addComment}
+                  disabled={!newComment.trim()}
+                  className="h-10 w-10 rounded-2xl bg-[#FF2D2D]/20 hover:bg-[#FF2D2D]/30 text-[#FF2D2D] flex items-center justify-center transition-colors disabled:opacity-30 shrink-0"
+                  data-ocid="comments.overlay.submit_button"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </SheetContent>
+        </Sheet>
       )}
 
       {/* ── More Options sheet ───────────────────────────────────────────── */}

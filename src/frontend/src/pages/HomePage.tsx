@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { VideoPost } from "../backend.d";
 import { AISearchBar } from "../components/AISearchBar";
+import { AccountMenuDropdown } from "../components/AccountMenuDropdown";
 import { CategoryTabs } from "../components/CategoryTabs";
 import type { Category } from "../components/CategoryTabs";
 import { HomeSectionRow } from "../components/HomeSectionRow";
@@ -13,10 +14,12 @@ import {
 import type { Notification } from "../components/NotificationsPanel";
 import { VideoCard, VideoCardSkeleton } from "../components/VideoCard";
 import { VideoPlayerModal } from "../components/VideoPlayerModal";
+import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import {
   useGetUsernameByPrincipal,
   useListVideoPosts,
 } from "../hooks/useQueries";
+import { addNotification, getUnreadCount } from "../utils/notificationStore";
 import { getEngagement } from "../utils/videoEngagement";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -194,10 +197,19 @@ function useUsernameMap(videos: VideoPost[]): Map<string, string> {
 
 interface HomePageProps {
   onCreatorClick?: (principalId: string) => void;
+  onProfileTab?: () => void;
+  onLogout?: () => void;
 }
 
-export default function HomePage({ onCreatorClick }: HomePageProps) {
+export default function HomePage({
+  onCreatorClick,
+  onProfileTab,
+  onLogout,
+}: HomePageProps) {
   const { data: videos, isLoading } = useListVideoPosts();
+  const { identity } = useInternetIdentity();
+  const userId = identity?.getPrincipal().toString() ?? "";
+
   const [selectedVideo, setSelectedVideo] = useState<VideoPost | null>(null);
   const [activeCategory, setActiveCategory] = useState<Category>("All");
   const [searchActive, setSearchActive] = useState(false);
@@ -208,6 +220,17 @@ export default function HomePage({ onCreatorClick }: HomePageProps) {
   );
   const [sortMode, setSortMode] = useState<SortMode>("latest");
   const [showSortMenu, setShowSortMenu] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+
+  // Real unread count from store, polled every 15s
+  const [realUnreadCount, setRealUnreadCount] = useState(0);
+  useEffect(() => {
+    if (!userId) return;
+    const load = () => setRealUnreadCount(getUnreadCount(userId));
+    load();
+    const interval = setInterval(load, 15_000);
+    return () => clearInterval(interval);
+  }, [userId]);
 
   // Build username map for @user search
   const usernameMap = useUsernameMap(videos ?? []);
@@ -224,18 +247,16 @@ export default function HomePage({ onCreatorClick }: HomePageProps) {
     };
   }, []);
 
-  // Auto-notification: detect newly uploaded videos
+  // Auto-notification: detect newly uploaded videos → add to store for current user
   const prevVideoCountRef = useRef<number | null>(null);
   useEffect(() => {
     if (!videos) return;
     const currentCount = videos.length;
     if (prevVideoCountRef.current === null) {
-      // First load — just record baseline
       prevVideoCountRef.current = currentCount;
       return;
     }
-    if (currentCount > prevVideoCountRef.current) {
-      // New video(s) uploaded — prepend notifications
+    if (currentCount > prevVideoCountRef.current && userId) {
       const newVideos = videos.slice(
         0,
         currentCount - prevVideoCountRef.current,
@@ -243,6 +264,14 @@ export default function HomePage({ onCreatorClick }: HomePageProps) {
       const newNotifs: Notification[] = newVideos.map((v) => {
         const uploaderName =
           usernameMap.get(v.uploader.toString()) ?? "creator";
+        // Add to store for current user
+        addNotification(userId, {
+          type: "upload",
+          title: "New Video Uploaded",
+          message: `@${uploaderName} uploaded a new video on SUB PREMIUM`,
+          videoId: v.id.toString(),
+          actorUsername: uploaderName,
+        });
         return {
           id: Date.now().toString() + v.id.toString(),
           type: "upload" as const,
@@ -254,11 +283,15 @@ export default function HomePage({ onCreatorClick }: HomePageProps) {
         };
       });
       setNotifications((prev) => [...newNotifs, ...prev]);
+      setRealUnreadCount((c) => c + newNotifs.length);
     }
     prevVideoCountRef.current = currentCount;
-  }, [videos, usernameMap]);
+  }, [videos, usernameMap, userId]);
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const unreadCount = Math.max(
+    notifications.filter((n) => !n.read).length,
+    realUnreadCount,
+  );
 
   const categoryFilteredVideos = useMemo(
     () => filterVideos(videos ?? [], activeCategory),
@@ -317,6 +350,7 @@ export default function HomePage({ onCreatorClick }: HomePageProps) {
 
   function handleToggleNotifications() {
     setNotificationsOpen((prev) => !prev);
+    setAccountMenuOpen(false);
   }
 
   function handleMarkRead(id: string) {
@@ -332,6 +366,18 @@ export default function HomePage({ onCreatorClick }: HomePageProps) {
   function handleVideoOpenFromNotification(videoId: string) {
     const video = (videos ?? []).find((v) => v.id.toString() === videoId);
     if (video) setSelectedVideo(video);
+  }
+
+  function handleAccountMenuNav(item: string) {
+    setAccountMenuOpen(false);
+    if (item === "notifications") {
+      setNotificationsOpen(true);
+    } else if (item === "logout") {
+      onLogout?.();
+    } else {
+      // profile, myVideos, subscriptions, settings — all go to profile tab
+      onProfileTab?.();
+    }
   }
 
   // Animation key: changes when search mode or category changes
@@ -403,6 +449,10 @@ export default function HomePage({ onCreatorClick }: HomePageProps) {
               type="button"
               data-ocid="home.profile.button"
               aria-label="Profile"
+              onClick={() => {
+                setAccountMenuOpen((prev) => !prev);
+                setNotificationsOpen(false);
+              }}
               className="w-9 h-9 rounded-full bg-[#1C1C1C] flex items-center justify-center
                          text-muted-foreground hover:text-foreground hover:bg-[#242424]
                          transition-colors duration-150 focus-visible:outline-none
@@ -477,10 +527,19 @@ export default function HomePage({ onCreatorClick }: HomePageProps) {
         <div className="h-px bg-border/20 mx-4" />
       </div>
 
+      {/* Account Menu Dropdown */}
+      <AccountMenuDropdown
+        open={accountMenuOpen}
+        onClose={() => setAccountMenuOpen(false)}
+        onNavigate={handleAccountMenuNav}
+        unreadCount={realUnreadCount}
+      />
+
       {/* Notifications panel (positioned below sticky header) */}
       <NotificationsPanel
         open={notificationsOpen}
         notifications={notifications}
+        userId={userId}
         onMarkRead={handleMarkRead}
         onMarkAllRead={handleMarkAllRead}
         onClose={() => setNotificationsOpen(false)}

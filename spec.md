@@ -1,72 +1,37 @@
-# SUB PREMIUM — Real Live Stream Engagement + Battle System
+# SUB PREMIUM
 
 ## Current State
-
-The app has a live streaming system (`NewLiveStreamScreen`) with:
-- Camera preview, countdown overlay, mic/flip controls
-- Basic chat panel with simulated messages
-- Gift panel with 5 gift types (simulated coins)
-- Battle mode (split-screen score bars, simulated score)
-- Co-host panel (mock viewers)
-- Moderator panel
-- Viewer count (simulated, incrementing randomly)
-- Coin earnings counter (local only, not backend-synced)
-- `LiveDiscoveryPage` showing mock stream cards
-
-Missing or incomplete:
-- No double-tap heart system
-- No engagement progress bar with celebration animation
-- No heart rain effect
-- No real gift types matching spec (Rose/Heart/Fire/Rocket/Crown/Dragon)
-- No gift animations with "username sent gift" overlay
-- No creator profit/earnings display
-- No withdrawal UI in the live screen
-- No HUD showing heart counter + progress bar above video
-- Battle system uses simulated scores, not gift-driven
-- Viewer count is fake (incrementing random, no real tracking)
-- Co-host chairs layout (3 per side) not shown in split-screen battle view
+Full-stack mobile-first video streaming platform with:
+- VideoPlayerModal: full video player with comments (threaded, AI suggest), settings modal (quality/speed/subtitles/audio), like/dislike, share, 3-dot menu (edit/delete for own videos), PiP mode
+- Comments stored in localStorage per video
+- Like system uses videoEngagement utils (local + backend sync)
+- Creator info shown in player modal with follow/unfollow
+- Bottom nav with Home, Shorts, +, Live, History, Profile
+- Backend has toggleVideoLike, recordVideoView, followCreator, unfollowCreator, isFollowing, listVideoPosts, getVideoPost, getUsernameByPrincipal
 
 ## Requested Changes (Diff)
 
 ### Add
-
-- **Double-tap heart system**: Detect double-tap (2 taps < 300ms) or triple-tap anywhere on the live screen. Spawn floating heart animations at tap position, floating upward. Unlimited taps. Heart counter increments per tap burst (shows ❤️ x3, ❤️ x200, ❤️ x10K, ❤️ x1M formatted).
-- **Engagement progress bar + HUD**: Above the video (in top area), display creator name, ❤️ heart counter, viewer count, and a horizontal progress bar. Scale: 0→10K=25%, 10K→100K=50%, 100K→500K=75%, 500K→1M=100%.
-- **Celebration animation at 100%**: When progress hits 100%, trigger confetti/sparkle/heart burst animation overlay, then reset progress bar to 0. Heart total continues counting.
-- **Heart rain effect**: When rapid taps detected (≥3 taps in 1 second), trigger heart rain — many hearts float continuously across screen.
-- **Updated gift types**: Rose=1, Heart=5, Fire=10, Rocket=100, Crown=500, Dragon=1000 coins. Match spec exactly.
-- **Gift notification overlay**: When gift sent, show animated overlay banner: "Alex sent Rocket 🚀". Premium gifts (≥100 coins) trigger full-screen animation overlay.
-- **Creator earnings HUD**: In top bar show total coins received, and earnings in USD (100 coins = $1).
-- **Battle split-screen with co-host chairs**: When battle active, show split-screen with Player 1 left / Player 2 right, each with 3 chair slots. Chairs fill when co-hosts join. Score driven by gift totals.
-- **Live HUD display**: Full HUD with creator name, viewer count, ❤️ heart counter, progress bar, gift notifications all visible during live.
-- **Bottom bar buttons**: Quick gift 🌹, Gift panel 🎁, Share 📤, Settings ⚙️, End Live 🔚 — styled per spec layout.
-- **Center floating controls**: Mic toggle and camera flip as floating center-screen controls during live.
+- **CommentsOverlay**: A bottom-sheet style overlay that slides up from the bottom covering ~60% of screen. Top half remains showing the video player (still playing). Bottom half is the comments section. Has a back/close arrow at top-left to dismiss.
+- **Video Header Info**: Above the video player (or in the overlay header) show creator profile picture (avatar), creator username, subscriber/follower count (e.g. "2.7M subscribers").
+- **Like button behavior**: If user hasn't liked — thumb icon is outlined/empty. After tapping — thumb turns red, count increments by 1. Visual toggle state.
+- **Comments section features**: Scrollable list of comments with profile picture, username, comment text, time posted, like button per comment. Add new comment input. Like individual comments. Reply to comments (nested).
+- **VideoSettingsMenu**: When ⚙️ settings icon is tapped on player: opens an overlay settings menu with: Subtitles/Captions, Video Quality, Playback Speed, Save Video, Report Video, Exit. Save and Cancel buttons at bottom. Settings already exist in VideoPlayerModal — this adds the menu items "Save Video" and "Report Video" and ensures the two bottom buttons (Save/Cancel) are prominent.
+- **Video player overlay controls**: Play/Pause, Progress bar, Like, Comment, Share, Settings icon — all as transparent overlay on video.
 
 ### Modify
-
-- `NewLiveStreamScreen`: Major overhaul — add double-tap detection, heart animation system, engagement progress bar, celebration effects, heart rain, updated gift types/animations, HUD display, improved battle layout with chairs.
-- `LiveDiscoveryPage`: Mark viewer counts as "live" (no change to mock data structure needed, just visual polish).
-- Gift panel: Replace current gifts with spec-defined gifts (Rose/Heart/Fire/Rocket/Crown/Dragon).
+- **CommentsOverlay trigger**: The comment button on the video actions row now opens the new CommentsOverlay instead of jumping to an inline section.
+- **Like button UI**: Change from ThumbsUp/ThumbsDown pair to a single like button that turns red when active, with count displayed.
+- **Settings modal**: Add "Save Video" and "Report Video" menu rows to the existing PlayerSettingsModal.
+- **Creator info section**: Enhance the creator header inside VideoPlayerModal to display avatar, username, and subscriber count prominently.
 
 ### Remove
-
-- Simulated random viewer count increments (replace with static starting count to represent "real" connected users concept — actual WebRTC tracking is out of scope for frontend-only).
-- Old coin earnings counter (replace with proper earnings HUD).
+- Nothing removed; existing VideoPlayerModal is enhanced in-place.
 
 ## Implementation Plan
-
-1. Create `HeartEngagementSystem` hook to manage heart count, progress bar state, tap detection, celebration trigger, heart rain state.
-2. Update `NewLiveStreamScreen`:
-   - Add tap/double-tap event listener on the video area.
-   - Render floating hearts at tap position.
-   - Add engagement HUD strip below top bar: creator name, ❤️ counter, viewer count, progress bar.
-   - When progress hits 100%: confetti burst animation, reset bar.
-   - Heart rain: when ≥3 taps/second, render multiple hearts floating across full screen.
-   - Update gift panel with Rose/Heart/Fire/Rocket/Crown/Dragon gifts.
-   - Add gift notification banner ("Alex sent Rocket 🚀") with full-screen for premium gifts.
-   - Update bottom bar to match spec: 🌹 Quick gift, 🎁 Gift panel, 📤 Share, ⚙️ Settings, 🔚 End live.
-   - Add center floating mic + flip controls.
-   - Update battle split-screen to show left/right panels with 3 chair slots each.
-   - Creator earnings display: coins → USD (coins/100 = dollars).
-3. All animations use `motion/react` (already installed).
-4. No backend changes — this is purely a frontend enhancement of engagement UX.
+1. Add `CommentsOverlay` component inside `VideoPlayerModal.tsx` — a Sheet/bottom-drawer that shows comments panel while video continues playing above it.
+2. Enhance `CreatorHeader` inside VideoPlayerModal to show avatar initials, username, subscriber count fetched from backend (useGetUsernameByPrincipal + follower count from engagement store).
+3. Update like button to be a single toggle button: outlined thumb when not liked, red filled when liked, count beside it.
+4. Add "Save Video" and "Report Video" rows to PlayerSettingsModal with toast feedback.
+5. Add `data-ocid` markers to all new interactive surfaces.
+6. Validate and fix any TS/lint errors.

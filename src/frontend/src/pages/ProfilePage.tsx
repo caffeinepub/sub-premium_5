@@ -41,7 +41,6 @@ import {
   HardDrive,
   ListVideo,
   LogOut,
-  Moon,
   Pencil,
   Play,
   Plus,
@@ -49,6 +48,7 @@ import {
   Shield,
   Trash2,
   User2,
+  Video,
   Wallet,
   X,
 } from "lucide-react";
@@ -59,6 +59,7 @@ import type { Playlist, VideoPost } from "../backend.d";
 import { EditProfilePanel } from "../components/EditProfilePanel";
 import { LanguageSelector } from "../components/LanguageSelector";
 import { OnlineStatusDot } from "../components/OnlineStatusDot";
+import { VideoPlayerModal } from "../components/VideoPlayerModal";
 import { useActor } from "../hooks/useActor";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import {
@@ -67,6 +68,7 @@ import {
   useDeletePlaylist,
   useGetExtendedProfile,
   useGetSavedVideos,
+  useGetSubscriptions,
   useGetUsername,
   useIsPremium,
   useListMyPlaylists,
@@ -76,6 +78,7 @@ import {
   useUnsaveVideo,
 } from "../hooks/useQueries";
 import { formatActiveStatus, getActiveStatus } from "../utils/activeStatus";
+import { getFollowerCount } from "../utils/notificationStore";
 
 // ─── localStorage helpers ─────────────────────────────────────────────────────
 
@@ -886,6 +889,73 @@ function SavedVideosSection({ allVideos }: { allVideos: VideoPost[] }) {
   );
 }
 
+// ─── My Videos Section ───────────────────────────────────────────────────────
+
+function MyVideosSection({
+  allVideos,
+  userId,
+  onVideoPlay,
+}: {
+  allVideos: VideoPost[];
+  userId: string;
+  onVideoPlay: (video: VideoPost) => void;
+}) {
+  const myVideos = allVideos.filter((v) => v.uploader.toString() === userId);
+
+  if (myVideos.length === 0) {
+    return (
+      <div
+        className="text-center py-8 text-muted-foreground text-sm"
+        data-ocid="profile.my_videos.empty_state"
+      >
+        You haven't uploaded any videos yet
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {myVideos.map((video, i) => {
+        const thumbUrl = video.thumbnailBlob.getDirectURL();
+        return (
+          <button
+            key={video.id.toString()}
+            type="button"
+            className="relative rounded-2xl overflow-hidden aspect-video bg-secondary group text-left"
+            data-ocid={`profile.my_videos.item.${i + 1}`}
+            onClick={() => onVideoPlay(video)}
+            aria-label={`Play ${video.title}`}
+          >
+            {thumbUrl ? (
+              <img
+                src={thumbUrl}
+                alt={video.title}
+                className="w-full h-full object-cover"
+                loading="lazy"
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center bg-secondary">
+                <Play className="w-6 h-6 text-muted-foreground" />
+              </div>
+            )}
+            {/* Overlay */}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+            {/* Play button on hover */}
+            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="w-8 h-8 rounded-full bg-[#FF2D2D]/90 flex items-center justify-center">
+                <Play className="w-3.5 h-3.5 text-white fill-white ml-0.5" />
+              </div>
+            </div>
+            <p className="absolute bottom-2 left-2 right-2 text-xs font-semibold text-white truncate leading-tight">
+              {video.title}
+            </p>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── My Playlists Section ─────────────────────────────────────────────────────
 
 function PlaylistDetailSheet({
@@ -1472,12 +1542,22 @@ export default function ProfilePage({
   const { data: extendedProfile } = useGetExtendedProfile();
   const queryClient = useQueryClient();
   const { data: allVideos = [] } = useListVideoPosts();
+  const { data: subscriptions = [] } = useGetSubscriptions();
   const [editOpen, setEditOpen] = useState(false);
+  const [myVideoPlayerVideo, setMyVideoPlayerVideo] =
+    useState<VideoPost | null>(null);
 
   const principalStr = identity?.getPrincipal().toString() ?? "";
   const shortPrincipalStr = principalStr
     ? `${principalStr.slice(0, 8)}…${principalStr.slice(-4)}`
     : "";
+
+  // Stats
+  const myVideoCount = allVideos.filter(
+    (v) => v.uploader.toString() === principalStr,
+  ).length;
+  const followerCount = principalStr ? getFollowerCount(principalStr) : 0;
+  const followingCount = subscriptions.length;
 
   // Use extended profile name if available, fallback to username or short principal
   const rawDisplayName =
@@ -1645,13 +1725,63 @@ export default function ProfilePage({
                 </button>
               </div>
             </div>
+
+            {/* Stats row */}
+            <div className="flex items-center justify-around mt-4 pt-4 border-t border-white/8">
+              <div className="flex flex-col items-center gap-0.5">
+                <span className="text-[#FF2D2D] font-black text-lg leading-none">
+                  {myVideoCount}
+                </span>
+                <span className="text-[11px] text-muted-foreground font-medium">
+                  Videos
+                </span>
+              </div>
+              <div className="h-8 w-px bg-white/8" />
+              <div className="flex flex-col items-center gap-0.5">
+                <span className="text-[#FF2D2D] font-black text-lg leading-none">
+                  {followerCount}
+                </span>
+                <span className="text-[11px] text-muted-foreground font-medium">
+                  Followers
+                </span>
+              </div>
+              <div className="h-8 w-px bg-white/8" />
+              <div className="flex flex-col items-center gap-0.5">
+                <span className="text-[#FF2D2D] font-black text-lg leading-none">
+                  {followingCount}
+                </span>
+                <span className="text-[11px] text-muted-foreground font-medium">
+                  Following
+                </span>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* My Videos */}
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.28, delay: sectionDelay(0) }}
+          >
+            <CollapsibleSection
+              icon={Video}
+              label="My Videos"
+              count={myVideoCount}
+              ocid="profile.my_videos.section"
+            >
+              <MyVideosSection
+                allVideos={allVideos}
+                userId={principalStr}
+                onVideoPlay={(video) => setMyVideoPlayerVideo(video)}
+              />
+            </CollapsibleSection>
           </motion.div>
 
           {/* Saved Videos */}
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.28, delay: sectionDelay(0) }}
+            transition={{ duration: 0.28, delay: sectionDelay(1) }}
           >
             <CollapsibleSection
               icon={BookmarkIcon}
@@ -1666,7 +1796,7 @@ export default function ProfilePage({
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.28, delay: sectionDelay(1) }}
+            transition={{ duration: 0.28, delay: sectionDelay(2) }}
           >
             <CollapsibleSection
               icon={ListVideo}
@@ -1681,7 +1811,7 @@ export default function ProfilePage({
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.28, delay: sectionDelay(2) }}
+            transition={{ duration: 0.28, delay: sectionDelay(3) }}
           >
             <CollapsibleSection
               icon={Crown}
@@ -1738,6 +1868,13 @@ export default function ProfilePage({
 
       {/* Edit Profile Panel */}
       <EditProfilePanel open={editOpen} onClose={() => setEditOpen(false)} />
+
+      {/* My Videos Player */}
+      <VideoPlayerModal
+        post={myVideoPlayerVideo}
+        open={!!myVideoPlayerVideo}
+        onClose={() => setMyVideoPlayerVideo(null)}
+      />
     </div>
   );
 }
