@@ -1,13 +1,23 @@
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Principal } from "@icp-sdk/core/principal";
-import { Clock, Eye, MessageCircle, Play, ThumbsUp } from "lucide-react";
+import {
+  AlertCircle,
+  Clock,
+  Eye,
+  MessageCircle,
+  Play,
+  ThumbsUp,
+  Upload,
+  X,
+} from "lucide-react";
 import { motion } from "motion/react";
 import { useMemo, useState } from "react";
 import type { VideoPost } from "../backend.d";
+import type { DraftUpload } from "../contexts/UploadManagerContext";
 import { useGetUsernameByPrincipal } from "../hooks/useQueries";
 import { getEngagement } from "../utils/videoEngagement";
 
-// ─── Comment count helper (still uses local storage via comment key) ──────────
+// ─── Comment count helper ───────────────────────────────────────────────────────────
 function getCommentCount(vid: string): number {
   try {
     const raw = localStorage.getItem(`cmt3-${vid}`);
@@ -45,6 +55,8 @@ function formatRelativeTime(timestampNs: bigint): string {
   if (minutes > 0) return `${minutes}m ago`;
   return "Just now";
 }
+
+// ─── VideoCard (published posts) ──────────────────────────────────────────────────────────
 
 interface VideoCardProps {
   post: VideoPost;
@@ -149,6 +161,179 @@ export function VideoCard({
         </div>
       </div>
     </motion.button>
+  );
+}
+
+// ─── DraftVideoCard (in-progress uploads) ───────────────────────────────────────────────────
+
+interface DraftVideoCardProps {
+  draft: DraftUpload;
+  onRemove: (id: string) => void;
+}
+
+export function DraftVideoCard({ draft, onRemove }: DraftVideoCardProps) {
+  const isError = draft.stage === "error";
+  const isUploading = draft.stage === "uploading";
+  const isProcessing = draft.stage === "processing";
+
+  const stageBadgeStyle: React.CSSProperties = isUploading
+    ? { background: "#FF0000", color: "#fff" }
+    : isProcessing
+      ? { background: "#F59E0B", color: "#fff" }
+      : { background: "rgba(255,255,255,0.15)", color: "#fff" };
+
+  const stageLabel = isUploading
+    ? "Uploading"
+    : isProcessing
+      ? "Processing"
+      : isError
+        ? "Failed"
+        : "Done";
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.96 }}
+      transition={{ duration: 0.25 }}
+      className="relative w-full text-left"
+      data-ocid="home.draft.card"
+    >
+      <div
+        className="rounded-2xl overflow-hidden border"
+        style={{
+          background: "#161616",
+          borderColor: isError
+            ? "rgba(255,0,0,0.35)"
+            : "rgba(255,255,255,0.07)",
+        }}
+      >
+        {/* Thumbnail area — gradient placeholder */}
+        <div
+          className="relative aspect-video flex items-center justify-center"
+          style={{
+            background: isError
+              ? "linear-gradient(135deg, #1a0000 0%, #2a0000 100%)"
+              : "linear-gradient(135deg, #1a1a1a 0%, #0a0a0a 100%)",
+          }}
+        >
+          {isError ? (
+            <div className="flex flex-col items-center gap-2">
+              <AlertCircle className="w-8 h-8" style={{ color: "#FF0000" }} />
+              <span
+                className="text-xs font-semibold"
+                style={{ color: "#FF6B6B" }}
+              >
+                Upload failed
+              </span>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-2">
+              <Upload
+                className="w-8 h-8"
+                style={{
+                  color: isUploading ? "#FF0000" : "#F59E0B",
+                  opacity: 0.8,
+                }}
+              />
+              <span
+                className="text-xs font-medium"
+                style={{ color: "rgba(255,255,255,0.5)" }}
+              >
+                {draft.title}
+              </span>
+            </div>
+          )}
+
+          {/* Stage badge */}
+          <div
+            className="absolute top-2 left-2 flex items-center gap-1 px-2 py-0.5 rounded-full"
+            style={{ ...stageBadgeStyle, fontSize: 10, fontWeight: 700 }}
+          >
+            {isUploading && (
+              <span
+                className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"
+                style={{ display: "inline-block" }}
+              />
+            )}
+            {stageLabel}
+          </div>
+
+          {/* Dismiss button */}
+          {(isError || (!isUploading && !isProcessing)) && (
+            <button
+              type="button"
+              onClick={() => onRemove(draft.id)}
+              className="absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center"
+              style={{ background: "rgba(0,0,0,0.6)" }}
+              aria-label="Dismiss"
+              data-ocid="home.draft.close_button"
+            >
+              <X className="w-3.5 h-3.5 text-white" />
+            </button>
+          )}
+
+          {/* Progress bar overlay */}
+          {!isError && (
+            <div className="absolute bottom-0 left-0 right-0">
+              <div
+                className="h-1 transition-all duration-300"
+                style={{
+                  width: `${draft.progress}%`,
+                  background: isUploading ? "#FF0000" : "#F59E0B",
+                }}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Info row */}
+        <div className="p-3">
+          <h3
+            className="font-semibold text-sm leading-snug line-clamp-1 mb-1"
+            style={{ color: "#fff" }}
+          >
+            {draft.title}
+          </h3>
+
+          {isError ? (
+            <p className="text-xs" style={{ color: "#FF6B6B" }}>
+              Upload failed. Tap × to dismiss.
+            </p>
+          ) : (
+            <div className="flex items-center justify-between gap-2">
+              {/* Progress text bar */}
+              <div className="flex-1">
+                <div
+                  className="flex items-center gap-1.5 mb-1"
+                  style={{ color: "rgba(255,255,255,0.6)", fontSize: 11 }}
+                >
+                  <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                    {Math.round(draft.progress)}%
+                  </span>
+                  {draft.chunkInfo ? (
+                    <span className="truncate">{draft.chunkInfo}</span>
+                  ) : null}
+                </div>
+                {/* Visual block progress */}
+                <div
+                  className="w-full rounded-full overflow-hidden"
+                  style={{ height: 3, background: "rgba(255,255,255,0.1)" }}
+                >
+                  <div
+                    className="h-full rounded-full transition-all duration-300"
+                    style={{
+                      width: `${draft.progress}%`,
+                      background: isUploading ? "#FF0000" : "#F59E0B",
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </motion.div>
   );
 }
 

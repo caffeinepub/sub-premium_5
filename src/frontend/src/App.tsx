@@ -6,6 +6,7 @@ import { AIAssistant } from "./components/AIAssistant";
 import { BottomNav } from "./components/BottomNav";
 import type { TabId } from "./components/BottomNav";
 import { CreateModal } from "./components/CreateModal";
+import { UploadManagerProvider } from "./contexts/UploadManagerContext";
 import { useActor } from "./hooks/useActor";
 import { useInternetIdentity } from "./hooks/useInternetIdentity";
 import { useGetCallerUserProfile } from "./hooks/useQueries";
@@ -373,7 +374,9 @@ function AppInner() {
 export default function App() {
   return (
     <LanguageProvider>
-      <AppInner />
+      <UploadManagerProvider>
+        <AppInner />
+      </UploadManagerProvider>
     </LanguageProvider>
   );
 }

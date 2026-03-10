@@ -12,8 +12,13 @@ import {
   NotificationsPanel,
 } from "../components/NotificationsPanel";
 import type { Notification } from "../components/NotificationsPanel";
-import { VideoCard, VideoCardSkeleton } from "../components/VideoCard";
+import {
+  DraftVideoCard,
+  VideoCard,
+  VideoCardSkeleton,
+} from "../components/VideoCard";
 import { VideoPlayerModal } from "../components/VideoPlayerModal";
+import { useUploadManager } from "../contexts/UploadManagerContext";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import {
   useGetUsernameByPrincipal,
@@ -297,6 +302,9 @@ export default function HomePage({
     () => filterVideos(videos ?? [], activeCategory),
     [videos, activeCategory],
   );
+
+  const { drafts, removeDraft } = useUploadManager();
+  const activeDrafts = drafts.filter((d) => d.stage !== "published");
 
   const displayedVideos = useMemo(() => {
     const base =
@@ -598,6 +606,14 @@ export default function HomePage({
                   </motion.div>
                 ) : (
                   <div className="space-y-4 pt-3" data-ocid="home.list">
+                    {/* Draft upload cards */}
+                    {activeDrafts.map((draft) => (
+                      <DraftVideoCard
+                        key={draft.id}
+                        draft={draft}
+                        onRemove={removeDraft}
+                      />
+                    ))}
                     {displayedVideos.map((post, index) => (
                       <VideoCard
                         key={post.id.toString()}

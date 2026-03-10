@@ -10,6 +10,7 @@ import {
   Image as ImageIcon,
   Loader2,
   RefreshCw,
+  RotateCcw,
   Upload,
   X,
 } from "lucide-react";
@@ -17,6 +18,13 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ExternalBlob } from "../backend";
+import {
+  type UploadSession,
+  clearSession,
+  getFileId,
+  loadSession,
+  useChunkedUpload,
+} from "../hooks/useChunkedUpload";
 import { useCreateVideoPost } from "../hooks/useQueries";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -76,7 +84,7 @@ async function validateVideoFile(file: File): Promise<string | null> {
     };
     video.onerror = () => {
       URL.revokeObjectURL(url);
-      resolve(null); // allow upload even if metadata can't be read
+      resolve(null);
     };
     video.src = url;
   });
@@ -91,10 +99,16 @@ export default function UploadPage() {
   const [description, setDescription] = useState("");
   const [videoProgress, setVideoProgress] = useState(0);
   const [stage, setStage] = useState<UploadStage>("idle");
+  const [chunkInfo, setChunkInfo] = useState("");
+  const [retryInfo, setRetryInfo] = useState("");
+  const [resumeSession, setResumeSession] = useState<UploadSession | null>(
+    null,
+  );
 
   const videoInputRef = useRef<HTMLInputElement>(null);
   const thumbnailInputRef = useRef<HTMLInputElement>(null);
   const createPost = useCreateVideoPost();
+  const { uploadFile, cancelUpload } = useChunkedUpload();
 
   const isUploadActive =
     stage === "uploading" ||
@@ -113,6 +127,17 @@ export default function UploadPage() {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [isUploadActive]);
 
+  // ── Visibility change — keep upload alive ──
+  useEffect(() => {
+    if (!isUploadActive) return;
+    const handleVisibility = () => {
+      // Background fetch/XHR continues automatically; nothing to do
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () =>
+      document.removeEventListener("visibilitychange", handleVisibility);
+  }, [isUploadActive]);
+
   const canPublish = !!videoFile && title.trim().length > 0 && !isUploadActive;
 
   // ── File Handlers ──
@@ -128,6 +153,18 @@ export default function UploadPage() {
       return;
     }
     setVideoFile(file);
+    setStage("idle");
+    setChunkInfo("");
+    setRetryInfo("");
+
+    // Check for existing resume session
+    const fileId = getFileId(file);
+    const existingSession = loadSession(fileId);
+    if (existingSession && existingSession.completedChunks.length > 0) {
+      setResumeSession(existingSession);
+    } else {
+      setResumeSession(null);
+    }
   };
 
   const handleThumbnailSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -143,20 +180,35 @@ export default function UploadPage() {
 
     setStage("uploading");
     setVideoProgress(0);
+    setChunkInfo("");
+    setRetryInfo("");
+    setResumeSession(null);
 
     try {
-      // Read video file
-      const videoBytes = await readFileAsBytes(videoFile);
-
-      // Create video blob with progress tracking + stage mapping
-      const videoBlob = ExternalBlob.fromBytes(videoBytes).withUploadProgress(
-        (pct) => {
+      // Chunked read phase (0–60%)
+      const videoBytes = await uploadFile(
+        videoFile,
+        (pct, info) => {
           setVideoProgress(pct);
           setStage(getStageFromProgress(pct));
+          setChunkInfo(info);
         },
+        (info) => setRetryInfo(info),
       );
 
-      // Build thumbnail blob — use selected file or fallback to 1×1 transparent PNG
+      setRetryInfo("");
+
+      // ExternalBlob upload phase (60–100%)
+      const videoBlob = ExternalBlob.fromBytes(
+        videoBytes as Uint8Array<ArrayBuffer>,
+      ).withUploadProgress((pct) => {
+        // Map ExternalBlob's 0–100 into our 60–100 range
+        const mapped = 60 + Math.round(pct * 0.4);
+        setVideoProgress(mapped);
+        setStage(getStageFromProgress(mapped));
+        setChunkInfo("");
+      });
+
       let thumbnailBlob: ExternalBlob;
       if (thumbnailFile) {
         const thumbBytes = await readFileAsBytes(thumbnailFile);
@@ -178,11 +230,15 @@ export default function UploadPage() {
         thumbnailBlob,
       });
 
+      void postId;
+
+      // Success — clear session
+      const fileId = getFileId(videoFile);
+      clearSession(fileId);
+
       setVideoProgress(100);
       setStage("done");
-      void postId; // bigint post ID — future: navigate to video detail
 
-      // Show success for 2s then reset form (user stays on Upload tab)
       setTimeout(() => {
         setVideoFile(null);
         setThumbnailFile(null);
@@ -190,12 +246,31 @@ export default function UploadPage() {
         setDescription("");
         setVideoProgress(0);
         setStage("idle");
+        setChunkInfo("");
         toast.success("Video published successfully!");
       }, 2000);
     } catch (err) {
+      // Keep session in localStorage so user can resume on retry
       setStage("error");
+      setChunkInfo("");
+      setRetryInfo("");
       console.error(err);
     }
+  };
+
+  const handleStartOver = () => {
+    if (videoFile) {
+      clearSession(getFileId(videoFile));
+    }
+    setResumeSession(null);
+  };
+
+  const handleCancelUpload = () => {
+    cancelUpload();
+    setStage("idle");
+    setVideoProgress(0);
+    setChunkInfo("");
+    setRetryInfo("");
   };
 
   return (
@@ -256,13 +331,13 @@ export default function UploadPage() {
                   </>
                 )}
               </div>
-              {/* Remove button */}
               {videoFile && !isUploadActive && (
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     setVideoFile(null);
+                    setResumeSession(null);
                   }}
                   className="absolute top-2 right-2 w-6 h-6 rounded-full bg-card flex items-center justify-center text-muted-foreground hover:text-foreground"
                   aria-label="Remove video"
@@ -271,7 +346,6 @@ export default function UploadPage() {
                 </button>
               )}
             </button>
-            {/* Hidden upload button for marker coverage */}
             <button
               type="button"
               onClick={() => videoInputRef.current?.click()}
@@ -283,7 +357,64 @@ export default function UploadPage() {
             </button>
           </div>
 
-          {/* Thumbnail selector (optional) */}
+          {/* ── Resume Prompt Banner ── */}
+          <AnimatePresence>
+            {resumeSession && !isUploadActive && (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.25 }}
+                data-ocid="upload.resume.panel"
+                className="rounded-2xl p-4 flex flex-col gap-3"
+                style={{
+                  background: "rgba(251,191,36,0.08)",
+                  border: "1px solid rgba(251,191,36,0.3)",
+                }}
+              >
+                <div className="flex items-start gap-2.5">
+                  <RotateCcw
+                    className="w-4 h-4 shrink-0 mt-0.5"
+                    style={{ color: "#fbbf24" }}
+                  />
+                  <div>
+                    <p
+                      className="text-sm font-bold"
+                      style={{ color: "#fbbf24" }}
+                    >
+                      Upload interrupted — resume?
+                    </p>
+                    <p className="text-xs mt-0.5 text-muted-foreground">
+                      {resumeSession.completedChunks.length} /{" "}
+                      {resumeSession.totalChunks} chunks already uploaded
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    data-ocid="upload.resume.primary_button"
+                    onClick={() => void handlePublish()}
+                    className="flex-1 h-9 rounded-xl text-xs font-bold"
+                    style={{ background: "#fbbf24", color: "#0f0f0f" }}
+                  >
+                    Resume Upload
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    data-ocid="upload.resume.secondary_button"
+                    onClick={handleStartOver}
+                    className="flex-1 h-9 rounded-xl text-xs font-bold border-border/50"
+                  >
+                    Start Over
+                  </Button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Thumbnail selector */}
           <div>
             <Label className="text-sm font-semibold mb-2 block">
               Thumbnail{" "}
@@ -443,6 +574,23 @@ export default function UploadPage() {
                 {/* Progress bar */}
                 <Progress value={videoProgress} className="h-2 bg-border" />
 
+                {/* Chunk info */}
+                {chunkInfo && (
+                  <p className="text-xs text-muted-foreground text-center">
+                    {chunkInfo}
+                  </p>
+                )}
+
+                {/* Retry info */}
+                {retryInfo && (
+                  <p
+                    className="text-xs text-center animate-pulse"
+                    style={{ color: "#fbbf24" }}
+                  >
+                    {retryInfo}
+                  </p>
+                )}
+
                 {/* Stage dot indicators */}
                 <div className="flex items-center justify-between gap-1 pt-1">
                   {UPLOAD_STAGES_ORDER.map((s) => {
@@ -488,6 +636,15 @@ export default function UploadPage() {
                     );
                   })}
                 </div>
+
+                {/* Cancel button */}
+                <button
+                  type="button"
+                  onClick={handleCancelUpload}
+                  className="w-full text-xs text-muted-foreground hover:text-foreground py-1 transition-colors"
+                >
+                  Cancel upload
+                </button>
               </motion.div>
             )}
           </AnimatePresence>
@@ -516,7 +673,7 @@ export default function UploadPage() {
                     Upload failed.
                   </p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Please try again.
+                    Your progress is saved. Tap Try Again to resume.
                   </p>
                 </div>
                 <Button

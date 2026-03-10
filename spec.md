@@ -1,34 +1,39 @@
 # SUB PREMIUM
 
 ## Current State
-The AI Assistant (`AIAssistant.tsx`) uses a large hardcoded pattern-matching function (`generateGlobalAIReply`) that returns static string answers for known questions. It handles greetings, world leaders, capitals, science, creator tools, etc. All responses are pre-written — no real external data is fetched.
+The upload system lives entirely inside `CreateModal.tsx` (`UploadSlide`). It:
+- Uses chunked upload (5MB chunks) via `useChunkedUpload`
+- Saves resume state in localStorage
+- Prevents page unload via `beforeunload` event
+- Blocks the user in the modal until upload finishes
+- Has 4-stage progress UI (Uploading → Processing → Encoding → Finalizing)
+- Only creates the video post AFTER the full upload completes
 
 ## Requested Changes (Diff)
 
 ### Add
-- Real web knowledge lookup using the DuckDuckGo Instant Answer API (`https://api.duckduckgo.com/?q=<query>&format=json&no_html=1&skip_disambig=1`) — CORS-compatible, no auth needed
-- Wikipedia summary fallback via `https://en.wikipedia.org/api/rest_v1/page/summary/<term>` for factual entity questions
-- `searchGlobalKnowledge(query)` async function that:
-  1. Tries DuckDuckGo Instant Answer API
-  2. Falls back to Wikipedia summary if DDG returns nothing
-  3. Falls back to curated local knowledge for creator tools
-  4. Returns "I couldn't find reliable information for that question." if all fail
-- Typing indicator shown while fetching (already exists, just needs wiring to async path)
-- Query classifier to route: `isCreatorQuestion` → local tools, else → live API search
+- **Global upload context** (`UploadManagerContext`) — a React context + provider mounted at the app root that holds all active draft uploads. Each upload entry tracks: `draftId`, `file`, `title`, `description`, `category`, `hashtags`, `audience`, `thumbnailFile`, `stage` (Uploading | Processing | Published), `progress`, `chunkInfo`.
+- **`useDraftUpload` hook** — exposes `startDraftUpload(file, meta)` which immediately adds a draft entry to the global context and starts background chunked upload + blob upload in the background, then marks it Published when done.
+- **Draft Video Cards on homepage** — `VideoCard` and the home feed show a special card variant for in-progress drafts with a progress bar (`██████░░ 60%`) and stage label. These cards are stored in the global context, not the backend, until Published.
+- **Video states badge** on video cards: `Uploading` (red pulsing), `Processing` (yellow), `Published` (no badge).
+- **Allow leaving upload page** — once `startDraftUpload` is called, the CreateModal can be closed. The upload continues in the background via the global context.
+- **Auto-publish** — when processing completes, the video post appears on homepage automatically.
+- **Background processing simulation** after upload: generate thumbnail → compress → create streaming qualities (UI states only, actual upload still goes to backend via `createVideoPost.mutateAsync`).
 
 ### Modify
-- `handleSend` / message submission flow: make it async, call `searchGlobalKnowledge`, await result, then append AI message
-- Keep all existing creator tool responses (video ideas, titles, hashtags, etc.) intact — routed locally without API call
-- Keep chat bubble UI, dark theme, typing indicator, quick suggestions — no visual changes
+- `UploadSlide` in `CreateModal.tsx` — replace the "lock user in modal" flow with "start draft and allow close". When user fills in title and taps Upload, call `startDraftUpload` and immediately allow closing the modal. Show a toast: "Upload started — you can browse the app while your video uploads."
+- `HomePage.tsx` — render draft upload cards from `UploadManagerContext` at the top of the feed.
+- `VideoCard.tsx` — add a `draftUpload` variant prop to show progress bar overlay and stage badge.
+- `App.tsx` — wrap with `UploadManagerProvider`.
 
 ### Remove
-- The giant hardcoded `generateGlobalAIReply` function for world-knowledge questions (creator tool section stays)
+- The `beforeunload` navigation block that prevents leaving the upload page.
+- The "Please stay on this page" warning banner (replaced by "uploading in background" toast).
 
 ## Implementation Plan
-1. Add `searchDuckDuckGo(query)` — fetch DDG Instant Answer, extract `AbstractText` or `Answer`
-2. Add `searchWikipedia(query)` — fetch Wikipedia summary for the most likely entity in the query
-3. Add `isCreatorQuery(query)` classifier — returns true for video/content/hashtag/creator questions
-4. Add `getGlobalAnswer(query)` orchestrator — tries DDG → Wikipedia → "couldn't find" fallback
-5. Replace `generateGlobalAIReply` call with async `getGlobalAnswer` in the send handler
-6. Keep existing creator tool local responses unchanged
-7. Wire typing indicator to show during async fetch
+1. Create `src/frontend/src/contexts/UploadManagerContext.tsx` with the global draft upload state and `startDraftUpload` function.
+2. Wrap `App.tsx` with `UploadManagerProvider`.
+3. Update `UploadSlide` in `CreateModal.tsx` to call `startDraftUpload` and close immediately.
+4. Update `VideoCard.tsx` to accept and render a draft upload variant with progress bar.
+5. Update `HomePage.tsx` to show active draft upload cards at the top of the feed.
+6. Remove `beforeunload` blocker and "stay on page" banner.

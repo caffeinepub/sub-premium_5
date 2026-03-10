@@ -23,6 +23,14 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { ExternalBlob } from "../backend";
+import {
+  type UploadSession,
+  clearSession,
+  getFileId,
+  loadSession,
+  useChunkedUpload,
+} from "../hooks/useChunkedUpload";
+import { useDraftUpload } from "../hooks/useDraftUpload";
 import { useCreateVideoPost } from "../hooks/useQueries";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -63,15 +71,6 @@ const UPLOAD_STAGE_LABELS: Record<
 const UPLOAD_STAGES_ORDER: Array<
   Exclude<UploadStage, "idle" | "done" | "error">
 > = ["uploading", "processing", "encoding", "finalizing"];
-
-function getStageFromProgress(
-  pct: number,
-): Exclude<UploadStage, "idle" | "done" | "error"> {
-  if (pct < 60) return "uploading";
-  if (pct < 80) return "processing";
-  if (pct < 95) return "encoding";
-  return "finalizing";
-}
 
 async function validateVideoFile(file: File): Promise<string | null> {
   if (file.size > MAX_FILE_SIZE) {
@@ -230,6 +229,7 @@ function UploadSlide({ onClose }: { onClose: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const createVideoPost = useCreateVideoPost();
+  const { startUploadAndClose } = useDraftUpload();
 
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [_thumbnailFile, setThumbnailFile] = useState<File | null>(null);
@@ -244,6 +244,13 @@ function UploadSlide({ onClose }: { onClose: () => void }) {
   const [audience, setAudience] = useState<PrivacyOption>("Public");
   const [uploadStage, setUploadStage] = useState<UploadStage>("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [chunkInfo, setChunkInfo] = useState("");
+  const [retryInfo, setRetryInfo] = useState("");
+  const [resumeSession, setResumeSession] = useState<UploadSession | null>(
+    null,
+  );
+
+  const { cancelUpload } = useChunkedUpload();
 
   const audienceOptions: PrivacyOption[] = ["Public", "Followers", "Private"];
 
@@ -253,16 +260,7 @@ function UploadSlide({ onClose }: { onClose: () => void }) {
     uploadStage === "encoding" ||
     uploadStage === "finalizing";
 
-  // ── Prevent page leave during active upload ──
-  useEffect(() => {
-    if (!isUploadActive) return;
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = "";
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [isUploadActive]);
+  // Upload is now background-managed via UploadManagerContext
 
   // Cleanup object URLs
   useEffect(() => {
@@ -280,6 +278,14 @@ function UploadSlide({ onClose }: { onClose: () => void }) {
   };
 
   const handleVideoInputChange = async (file: File) => {
+    // Check for existing resume session
+    const fileId = getFileId(file);
+    const existingSession = loadSession(fileId);
+    if (existingSession && existingSession.completedChunks.length > 0) {
+      setResumeSession(existingSession);
+    } else {
+      setResumeSession(null);
+    }
     const err = await validateVideoFile(file);
     if (err) {
       toast.error(err);
@@ -316,61 +322,14 @@ function UploadSlide({ onClose }: { onClose: () => void }) {
     );
   };
 
-  const handlePublish = async () => {
+  const handlePublish = () => {
     if (!videoFile || !title.trim()) return;
-
-    setUploadStage("uploading");
-    setUploadProgress(0);
-
-    try {
-      // Convert video file to Uint8Array
-      const videoBuffer = await videoFile.arrayBuffer();
-      const videoBytes = new Uint8Array(videoBuffer);
-
-      // Build video blob with upload progress tracking + stage mapping
-      const videoBlob = ExternalBlob.fromBytes(videoBytes).withUploadProgress(
-        (pct) => {
-          setUploadProgress(pct);
-          setUploadStage(getStageFromProgress(pct));
-        },
-      );
-
-      // Build thumbnail blob — use selected file or fallback to 1×1 transparent PNG
-      let thumbnailBlob: ExternalBlob;
-      if (_thumbnailFile) {
-        const thumbBuffer = await _thumbnailFile.arrayBuffer();
-        const thumbBytes = new Uint8Array(thumbBuffer);
-        thumbnailBlob = ExternalBlob.fromBytes(thumbBytes);
-      } else {
-        // Minimal 1×1 transparent PNG fallback
-        const fallbackBytes = new Uint8Array([
-          137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0,
-          1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 10, 73, 68,
-          65, 84, 120, 156, 98, 0, 1, 0, 0, 5, 0, 1, 13, 10, 45, 180, 0, 0, 0,
-          0, 73, 69, 78, 68, 174, 66, 96, 130,
-        ]);
-        thumbnailBlob = ExternalBlob.fromBytes(fallbackBytes);
-      }
-
-      const postId = await createVideoPost.mutateAsync({
-        title: title.trim(),
-        description,
-        videoBlob,
-        thumbnailBlob,
-      });
-
-      setUploadProgress(100);
-      setUploadStage("done");
-
-      // Close modal after showing success — app will return to home feed
-      // where the newly uploaded video will appear
-      void postId; // postId is a bigint — used for cache busting in future
-      setTimeout(() => {
-        onClose();
-      }, 1500);
-    } catch {
-      setUploadStage("error");
-    }
+    startUploadAndClose(
+      videoFile,
+      { title: title.trim(), description },
+      _thumbnailFile,
+    );
+    onClose();
   };
 
   const handleSaveDraft = () => {
@@ -380,6 +339,19 @@ function UploadSlide({ onClose }: { onClose: () => void }) {
     }
     toast.success("Draft saved!");
     setUploadStage("idle");
+  };
+
+  const handleStartOver = () => {
+    if (videoFile) clearSession(getFileId(videoFile));
+    setResumeSession(null);
+  };
+
+  const handleCancelUpload = () => {
+    cancelUpload();
+    setUploadStage("idle");
+    setUploadProgress(0);
+    setChunkInfo("");
+    setRetryInfo("");
   };
 
   const canPublish =
@@ -577,6 +549,57 @@ function UploadSlide({ onClose }: { onClose: () => void }) {
           {/* Hidden canvas for thumbnail generation */}
           <canvas ref={canvasRef} className="sr-only" />
         </div>
+
+        {/* ── Resume Upload Banner ── */}
+        {resumeSession && !isUploadActive && (
+          <div className="px-4 pt-4">
+            <div
+              className="rounded-2xl p-4 flex flex-col gap-3"
+              data-ocid="create_modal.upload.resume.panel"
+              style={{
+                background: "rgba(251,191,36,0.08)",
+                border: "1px solid rgba(251,191,36,0.3)",
+              }}
+            >
+              <div>
+                <p className="text-sm font-bold" style={{ color: "#fbbf24" }}>
+                  Upload interrupted — resume?
+                </p>
+                <p
+                  className="text-xs mt-0.5"
+                  style={{ color: "rgba(255,255,255,0.4)" }}
+                >
+                  {resumeSession.completedChunks.length} /{" "}
+                  {resumeSession.totalChunks} chunks already uploaded
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  data-ocid="create_modal.upload.resume.primary_button"
+                  onClick={() => void handlePublish()}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-bold"
+                  style={{ background: "#fbbf24", color: "#0f0f0f" }}
+                >
+                  Resume Upload
+                </button>
+                <button
+                  type="button"
+                  data-ocid="create_modal.upload.resume.secondary_button"
+                  onClick={handleStartOver}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-bold"
+                  style={{
+                    background: "rgba(255,255,255,0.08)",
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    color: "rgba(255,255,255,0.6)",
+                  }}
+                >
+                  Start Over
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── Section: Video Details ── */}
         <div className="px-4 pt-6 pb-2">
@@ -795,6 +818,26 @@ function UploadSlide({ onClose }: { onClose: () => void }) {
                   }
                 />
 
+                {/* Chunk info */}
+                {chunkInfo && (
+                  <p
+                    className="text-xs text-center"
+                    style={{ color: "rgba(255,255,255,0.5)" }}
+                  >
+                    {chunkInfo}
+                  </p>
+                )}
+
+                {/* Retry info */}
+                {retryInfo && (
+                  <p
+                    className="text-xs text-center animate-pulse"
+                    style={{ color: "#fbbf24" }}
+                  >
+                    {retryInfo}
+                  </p>
+                )}
+
                 {/* Stage dot indicators */}
                 <div className="flex items-center justify-between gap-1 pt-1">
                   {UPLOAD_STAGES_ORDER.map((stage) => {
@@ -838,6 +881,16 @@ function UploadSlide({ onClose }: { onClose: () => void }) {
                     );
                   })}
                 </div>
+
+                {/* Cancel upload */}
+                <button
+                  type="button"
+                  onClick={handleCancelUpload}
+                  className="w-full text-xs py-1 transition-colors"
+                  style={{ color: "rgba(255,255,255,0.35)" }}
+                >
+                  Cancel upload
+                </button>
               </motion.div>
             )}
           </AnimatePresence>
@@ -966,6 +1019,8 @@ function UploadSlide({ onClose }: { onClose: () => void }) {
     </div>
   );
 }
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 // ─── Shorts Slide ──────────────────────────────────────────────────────────────
 
