@@ -1,4 +1,4 @@
-import { Bot, Send, Sparkles, X } from "lucide-react";
+import { Bot, Globe, Send, Sparkles, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -11,390 +11,64 @@ interface Message {
   timestamp: number;
 }
 
-// ─── Global AI Response Engine ────────────────────────────────────────────────
+// ─── Quick Suggestions ───────────────────────────────────────────────────────
 
 const QUICK_SUGGESTIONS = [
   "What is AI?",
   "Suggest video ideas",
   "Capital of France?",
-  "Help with title",
+  "Who invented the internet?",
 ] as const;
 
-function generateGlobalAIReply(input: string): string {
+// ─── Creator Query Detection ─────────────────────────────────────────────────
+
+function isCreatorQuery(q: string): boolean {
+  const lower = q.toLowerCase();
+  const creatorKeywords = [
+    "video idea",
+    "video ideas",
+    "title",
+    "hashtag",
+    "thumbnail",
+    "channel",
+    "content idea",
+    "content strategy",
+    "script",
+    "description",
+    "trending topic",
+    "vlog",
+    "shorts idea",
+    "youtube",
+    "creator",
+    "upload tip",
+    "what to make",
+    "what to upload",
+    "tag",
+    "keyword",
+    "playlist",
+    "series idea",
+  ];
+  return creatorKeywords.some((kw) => lower.includes(kw));
+}
+
+// ─── Creator Tools (local, instant) ──────────────────────────────────────────
+
+function getCreatorAnswer(input: string): string {
   const q = input.toLowerCase().trim();
 
-  // ── Greetings ──────────────────────────────────────────────────────────────
   if (
-    q === "hi" ||
-    q === "hello" ||
-    q === "hey" ||
-    q.startsWith("hello") ||
-    q.startsWith("hi ")
+    q.includes("travel vlog") ||
+    (q.includes("travel") && q.includes("idea"))
   ) {
-    return "Hey! I'm your SUB PREMIUM Global AI Assistant 👋\n\nI can help you with:\n• Geography, history & science\n• World leaders & countries\n• Technology & culture\n• Video ideas, titles & creator tools\n\nAsk me anything!";
+    return "Here are some travel vlog ideas:\n\n1. 24 Hours Exploring Tokyo\n2. Best Street Food in Bangkok\n3. Hidden Beaches You Must Visit\n4. Solo Travel Guide for Budget Travelers\n5. Europe in 10 Days: The Ultimate Itinerary\n6. Most Underrated Cities in the World\n\nWant ideas for a specific destination?";
   }
 
-  // ── Help / Capabilities ────────────────────────────────────────────────────
-  if (
-    q.includes("help") ||
-    q.includes("what can you do") ||
-    q.includes("capabilities")
-  ) {
-    return "Here's what I can help with:\n\n🌍 World knowledge — geography, history, science\n👤 World leaders — presidents, prime ministers\n🏙️ Countries & capitals — facts & culture\n💡 Technology — AI, internet, inventions\n🎬 Creator tools — video ideas, titles, tags\n🔥 Trends — what's popular right now\n\nJust ask me anything!";
-  }
-
-  // ── World Leaders / Government ─────────────────────────────────────────────
-  if (
-    (q.includes("president") && q.includes("united states")) ||
-    (q.includes("president") && q.includes("usa")) ||
-    (q.includes("president") && q.includes("america") && !q.includes("south"))
-  ) {
-    return "The current President of the United States is Joe Biden (46th president). He took office on January 20, 2021.";
-  }
-
-  if (q.includes("president") && q.includes("france")) {
-    return "The current President of France is Emmanuel Macron. He has been president since May 2017.";
-  }
-
-  if (
-    (q.includes("prime minister") && q.includes("uk")) ||
-    (q.includes("prime minister") && q.includes("england")) ||
-    (q.includes("prime minister") && q.includes("britain")) ||
-    (q.includes("prime minister") && q.includes("united kingdom"))
-  ) {
-    return "The current Prime Minister of the United Kingdom is Rishi Sunak. He took office in October 2022.";
-  }
-
-  if (q.includes("president") && q.includes("russia")) {
-    return "The President of Russia is Vladimir Putin. He has served multiple terms since 2000.";
-  }
-
-  if (q.includes("president") && q.includes("china")) {
-    return "The President of China is Xi Jinping. He has been in power since 2013.";
-  }
-
-  if (q.includes("president") && q.includes("brazil")) {
-    return "The President of Brazil is Luiz Inácio Lula da Silva (Lula). He returned to office in January 2023.";
-  }
-
-  if (q.includes("chancellor") && q.includes("germany")) {
-    return "The Chancellor of Germany is Olaf Scholz. He took office in December 2021.";
-  }
-
-  if (
-    (q.includes("prime minister") && q.includes("india")) ||
-    (q.includes("pm") && q.includes("india"))
-  ) {
-    return "The Prime Minister of India is Narendra Modi. He has been in office since 2014.";
-  }
-
-  // ── Countries and Capitals ─────────────────────────────────────────────────
-  if (q.includes("capital") && q.includes("france")) {
-    return "The capital of France is Paris. It is also the largest city in France and a major global center for art, culture, and fashion.";
-  }
-
-  if (q.includes("capital") && q.includes("japan")) {
-    return "The capital of Japan is Tokyo. It is one of the most populous cities in the world.";
-  }
-
-  if (
-    (q.includes("capital") && q.includes("usa")) ||
-    (q.includes("capital") && q.includes("united states")) ||
-    (q.includes("capital") &&
-      q.includes("america") &&
-      !q.includes("south") &&
-      !q.includes("latin"))
-  ) {
-    return "The capital of the United States is Washington, D.C. (District of Columbia). It is the seat of the U.S. federal government.";
-  }
-
-  if (q.includes("capital") && q.includes("germany")) {
-    return "The capital of Germany is Berlin. It is the largest city in Germany.";
-  }
-
-  if (q.includes("capital") && q.includes("brazil")) {
-    return "The capital of Brazil is Brasília. It was purpose-built as the capital and inaugurated in 1960.";
-  }
-
-  if (q.includes("capital") && q.includes("china")) {
-    return "The capital of China is Beijing. It has been the political center of China for centuries.";
-  }
-
-  if (q.includes("capital") && q.includes("australia")) {
-    return "The capital of Australia is Canberra, not Sydney or Melbourne as many people assume.";
-  }
-
-  if (q.includes("capital") && q.includes("russia")) {
-    return "The capital of Russia is Moscow. It is also the largest city in Russia.";
-  }
-
-  if (q.includes("capital") && q.includes("italy")) {
-    return "The capital of Italy is Rome, also known as the Eternal City.";
-  }
-
-  if (q.includes("capital") && q.includes("spain")) {
-    return "The capital of Spain is Madrid.";
-  }
-
-  if (q.includes("capital") && q.includes("canada")) {
-    return "The capital of Canada is Ottawa, located in the province of Ontario.";
-  }
-
-  if (q.includes("capital") && q.includes("mexico")) {
-    return "The capital of Mexico is Mexico City (Ciudad de México).";
-  }
-
-  if (q.includes("capital") && q.includes("india")) {
-    return "The capital of India is New Delhi.";
-  }
-
-  if (q.includes("capital") && q.includes("uk")) {
-    return "The capital of the United Kingdom is London. It is one of the world's leading financial and cultural centers.";
-  }
-
-  if (q.includes("capital") && q.includes("egypt")) {
-    return "The capital of Egypt is Cairo. It is the largest city in Africa.";
-  }
-
-  if (q.includes("capital") && q.includes("south africa")) {
-    return "South Africa has three capitals: Pretoria (executive), Cape Town (legislative), and Bloemfontein (judicial).";
-  }
-
-  if (q.includes("capital") && q.includes("argentina")) {
-    return "The capital of Argentina is Buenos Aires.";
-  }
-
-  if (q.includes("capital of")) {
-    return "I don't have that capital on hand right now, but you can find it quickly on any geography reference site.";
-  }
-
-  // ── Geography / World Facts ────────────────────────────────────────────────
-  if (
-    q.includes("tallest building") ||
-    q.includes("highest building") ||
-    q.includes("tallest skyscraper")
-  ) {
-    return "The tallest building in the world is the Burj Khalifa in Dubai, UAE. It stands at 828 meters (2,717 feet) tall and was completed in 2010.";
-  }
-
-  if (q.includes("longest river")) {
-    return "The longest river in the world is the Nile River in Africa, stretching approximately 6,650 kilometers (4,130 miles). The Amazon River in South America is a close second.";
-  }
-
-  if (
-    q.includes("largest country") ||
-    (q.includes("biggest country") && q.includes("land"))
-  ) {
-    return "The largest country in the world by land area is Russia, covering approximately 17.1 million square kilometers.";
-  }
-
-  if (q.includes("smallest country")) {
-    return "The smallest country in the world is Vatican City, located within Rome, Italy. It covers just 0.44 square kilometers.";
-  }
-
-  if (
-    q.includes("highest mountain") ||
-    q.includes("tallest mountain") ||
-    q.includes("mount everest") ||
-    q.includes("mt everest")
-  ) {
-    return "The highest mountain in the world is Mount Everest, standing at 8,849 meters (29,032 feet) above sea level. It is located in the Himalayas on the border of Nepal and Tibet.";
-  }
-
-  if (q.includes("largest ocean")) {
-    return "The largest ocean in the world is the Pacific Ocean. It covers more than 165 million square kilometers, making it larger than all of Earth's landmasses combined.";
-  }
-
-  if (
-    q.includes("deepest ocean") ||
-    q.includes("deepest point") ||
-    q.includes("mariana trench")
-  ) {
-    return "The deepest point in the world is the Mariana Trench in the Pacific Ocean, reaching approximately 11,034 meters (36,200 feet) at its deepest point, called Challenger Deep.";
-  }
-
-  if (q.includes("largest continent")) {
-    return "The largest continent by area is Asia, covering approximately 44.6 million square kilometers.";
-  }
-
-  if (
-    q.includes("most populous country") ||
-    q.includes("most populated country") ||
-    q.includes("largest population")
-  ) {
-    return "The most populous country in the world is India, which surpassed China in 2023 with over 1.4 billion people.";
-  }
-
-  if (q.includes("how many continents") || q.includes("number of continents")) {
-    return "There are 7 continents on Earth: Africa, Antarctica, Asia, Australia (Oceania), Europe, North America, and South America.";
-  }
-
-  if (q.includes("how many planets") || q.includes("number of planets")) {
-    return "There are 8 planets in our solar system: Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, and Neptune. Pluto was reclassified as a dwarf planet in 2006.";
-  }
-
-  if (q.includes("what is the solar system") || q.includes("solar system")) {
-    return "The solar system consists of the Sun and all the objects that orbit it, including 8 planets, 5 officially recognized dwarf planets, moons, asteroids, and comets. It is located in the Milky Way galaxy.";
-  }
-
-  if (q.includes("climate change") || q.includes("global warming")) {
-    return "Climate change refers to long-term shifts in global temperatures and weather patterns. While some climate change is natural, since the 20th century human activities — especially burning fossil fuels — have been the main driver of rapid climate change. It leads to rising sea levels, extreme weather events, and ecosystem disruption.";
-  }
-
-  // ── Science ────────────────────────────────────────────────────────────────
-  if (
-    q.includes("what is artificial intelligence") ||
-    q.includes("what is ai") ||
-    q === "ai" ||
-    (q.includes("artificial intelligence") && q.includes("what"))
-  ) {
-    return "Artificial Intelligence (AI) is the simulation of human intelligence by computer systems. It includes machine learning, natural language processing, computer vision, and robotics. AI systems can learn from data, recognize patterns, make decisions, and perform tasks that typically require human intelligence.";
-  }
-
-  if (q.includes("speed of light")) {
-    return "The speed of light in a vacuum is approximately 299,792,458 meters per second (about 300,000 km/s or 186,000 miles per second). It is denoted by the letter 'c' and is a fundamental constant in physics.";
-  }
-
-  if (q.includes("what is dna") || q === "dna") {
-    return "DNA (Deoxyribonucleic Acid) is the molecule that carries the genetic instructions for the development, functioning, growth, and reproduction of all known organisms. It is shaped like a double helix and contains four chemical bases: adenine, thymine, guanine, and cytosine.";
-  }
-
-  if (
-    q.includes("what is gravity") ||
-    (q.includes("gravity") && q.includes("what"))
-  ) {
-    return "Gravity is a fundamental force of nature that attracts objects with mass toward each other. On Earth, it gives weight to physical objects and causes them to fall toward the ground. It was first mathematically described by Sir Isaac Newton and later refined by Albert Einstein's theory of general relativity.";
-  }
-
-  if (
-    q.includes("who discovered gravity") ||
-    q.includes("who invented gravity")
-  ) {
-    return "Gravity was famously described by Sir Isaac Newton around 1666, inspired (according to legend) by seeing an apple fall from a tree. He formulated the law of universal gravitation.";
-  }
-
-  if (q.includes("photosynthesis")) {
-    return "Photosynthesis is the process by which plants, algae, and some bacteria convert sunlight, water, and carbon dioxide into glucose (sugar) and oxygen. It is the foundation of most life on Earth.";
-  }
-
-  // ── Technology ─────────────────────────────────────────────────────────────
-  if (
-    q.includes("who invented the internet") ||
-    q.includes("who created the internet")
-  ) {
-    return "The internet was developed over several decades. The foundational work was done by ARPANET in the 1960s (funded by the U.S. Department of Defense). Tim Berners-Lee invented the World Wide Web in 1989, which made the internet accessible to the public.";
-  }
-
-  if (
-    q.includes("who invented the telephone") ||
-    q.includes("who created the telephone")
-  ) {
-    return "The telephone was invented by Alexander Graham Bell, who received the first patent for it in 1876.";
-  }
-
-  if (
-    q.includes("who invented the airplane") ||
-    q.includes("wright brothers")
-  ) {
-    return "The airplane was invented by the Wright Brothers — Orville and Wilbur Wright. They made the first successful powered flight on December 17, 1903, at Kitty Hawk, North Carolina.";
-  }
-
-  if (
-    q.includes("who invented electricity") ||
-    q.includes("who discovered electricity") ||
-    q.includes("benjamin franklin")
-  ) {
-    return "Electricity was not invented by one person, but Benjamin Franklin is famous for his experiments with lightning in the 1750s. Thomas Edison developed the first practical electric light bulb and power distribution system in 1879.";
-  }
-
-  if (q.includes("machine learning") && q.includes("what")) {
-    return "Machine learning is a subset of artificial intelligence where systems learn from data to improve their performance over time without being explicitly programmed. It powers recommendation engines, image recognition, voice assistants, and much more.";
-  }
-
-  if (
-    q.includes("what is blockchain") ||
-    (q.includes("blockchain") && q.includes("what"))
-  ) {
-    return "Blockchain is a distributed digital ledger technology that records transactions across many computers in a secure, transparent, and tamper-resistant way. It is the underlying technology behind cryptocurrencies like Bitcoin.";
-  }
-
-  if (
-    q.includes("what is bitcoin") ||
-    (q.includes("bitcoin") && q.includes("what"))
-  ) {
-    return "Bitcoin is the world's first and most well-known cryptocurrency. It was created in 2009 by an anonymous person or group known as Satoshi Nakamoto. It operates on blockchain technology and allows peer-to-peer transactions without a central bank.";
-  }
-
-  // ── History ────────────────────────────────────────────────────────────────
-  if (
-    q.includes("world war 1") ||
-    q.includes("first world war") ||
-    q.includes("ww1") ||
-    q.includes("wwi")
-  ) {
-    return "World War I (1914–1918) was a global conflict centered in Europe. It was triggered by the assassination of Archduke Franz Ferdinand of Austria-Hungary. The war involved most of the world's great powers and resulted in over 17 million deaths. It ended with the Treaty of Versailles in 1919.";
-  }
-
-  if (
-    q.includes("world war 2") ||
-    q.includes("second world war") ||
-    q.includes("ww2") ||
-    q.includes("wwii")
-  ) {
-    return "World War II (1939–1945) was the deadliest conflict in human history, involving over 30 countries and resulting in 70–85 million deaths. It began with Germany's invasion of Poland and ended with the defeat of Nazi Germany and Imperial Japan. The war led to the formation of the United Nations.";
-  }
-
-  if (q.includes("napoleon")) {
-    return "Napoleon Bonaparte (1769–1821) was a French military and political leader who rose to prominence during the French Revolution. He became Emperor of the French and conquered much of Europe before being defeated and exiled.";
-  }
-
-  if (q.includes("french revolution")) {
-    return "The French Revolution (1789–1799) was a period of radical political and societal change in France. It led to the overthrow of the monarchy, the establishment of a republic, and the rise of Napoleon Bonaparte.";
-  }
-
-  if (q.includes("einstein") || q.includes("albert einstein")) {
-    return "Albert Einstein (1879–1955) was a German-born theoretical physicist who developed the theory of relativity, one of the two pillars of modern physics. He is best known for the mass-energy equivalence formula E=mc². He won the Nobel Prize in Physics in 1921.";
-  }
-
-  // ── Entertainment ──────────────────────────────────────────────────────────
-  if (
-    q.includes("highest grossing movie") ||
-    q.includes("best selling movie") ||
-    q.includes("most watched movie") ||
-    q.includes("top grossing")
-  ) {
-    return "The highest-grossing film of all time is Avatar (2009, re-released 2022) directed by James Cameron, earning over $2.9 billion worldwide. Avatar: The Way of Water (2022) is also in the top 5.";
-  }
-
-  if (q.includes("taylor swift")) {
-    return "Taylor Swift is one of the best-selling music artists of all time. She is an American singer-songwriter known for her country and pop music, with albums including Fearless, 1989, Reputation, and The Eras Tour.";
-  }
-
-  if (
-    q.includes("richest person") ||
-    q.includes("wealthiest person") ||
-    q.includes("richest man") ||
-    q.includes("richest woman")
-  ) {
-    return "As of recent rankings, the richest people in the world include Elon Musk (Tesla, SpaceX), Jeff Bezos (Amazon), and Bernard Arnault (LVMH). Rankings change frequently based on stock valuations.";
-  }
-
-  // ── Creator Tools (preserved) ──────────────────────────────────────────────
   if (
     q.includes("video idea") ||
     q.includes("what to make") ||
     q.includes("content idea")
   ) {
     return 'Here are some hot video ideas right now:\n\n• "A Day in My Life" vlog series\n• Tutorial: How to master your niche in 30 days\n• React vs. Reaction: Comparing trends in your category\n• Behind-the-scenes of your creative process\n• Top 10 mistakes beginners make in [your niche]\n\nWant me to tailor ideas to a specific category?';
-  }
-
-  if (
-    q.includes("trend") ||
-    q.includes("popular") ||
-    q.includes("hot topic") ||
-    q.includes("viral")
-  ) {
-    return 'Trending right now on SUB PREMIUM:\n\n🔥 Short-form storytelling (60s stories)\n🎬 Mini documentaries\n💡 "No equipment needed" tutorials\n🎵 Reaction & commentary videos\n🚀 Creator growth tips\n\nShorts and quick tutorials are getting the most engagement this week!';
   }
 
   if (
@@ -417,30 +91,118 @@ function generateGlobalAIReply(input: string): string {
     return "Smart tagging tips:\n\n• Use 5–10 specific tags per video\n• Mix broad tags (#tutorials) with niche ones (#beginnerphotoediting)\n• Include your channel name as a tag\n• Use tags your audience actually searches for\n• Check what tags top videos in your niche use\n\nTell me your video topic and I'll suggest specific tags!";
   }
 
+  if (q.includes("thumbnail")) {
+    return "Thumbnail best practices:\n\n• Use high contrast — bright colors on dark backgrounds\n• Show a clear face with an expressive emotion\n• Add 3–5 bold words max (readable on mobile)\n• Use consistent fonts and colors across your channel\n• A/B test different thumbnails for the same video\n\nNeed help designing a thumbnail concept for a specific topic?";
+  }
+
   if (q.includes("playlist") || q.includes("series")) {
     return "Playlists boost watch time significantly! Here's how to structure them:\n\n• Group videos by topic or difficulty level\n• Name playlists with searchable keywords\n• Add a short intro video as the first in each list\n• Keep playlists to 5–15 videos for best completion rates\n• Pin your best playlist to your profile\n\nShall I suggest playlist categories based on your content?";
   }
 
-  if (
-    q.includes("watch") ||
-    q.includes("something to see") ||
-    q.includes("recommend") ||
-    q.includes("suggest") ||
-    q.includes("find")
-  ) {
-    return "Based on what's popular right now, I recommend:\n\n🎬 Movies section for cinematic content\n⚡ Shorts for quick entertainment (< 60s)\n🌟 Premium for exclusive, ad-free content\n📈 Trending tab for what everyone's watching\n\nHead to the Home tab and use the category filters to explore!";
+  if (q.includes("upload tip") || q.includes("upload")) {
+    return "Top upload tips for SUB PREMIUM creators:\n\n• Upload consistently — at least 2–3 times per week\n• Post when your audience is most active (check analytics)\n• Use a strong hook in the first 3 seconds\n• Respond to comments in the first hour (boosts algorithm)\n• Cross-promote on other platforms\n\nConsistency beats perfection every time!";
   }
 
-  // ── Travel Vlog Ideas ──────────────────────────────────────────────────────
+  // Generic creator fallback
+  return "Here are some creator tips for SUB PREMIUM:\n\n🎬 Video ideas — Ask me for topic-specific ideas\n📝 Titles — I can write click-worthy headlines\n#️⃣ Hashtags — I'll suggest tags for your niche\n📖 Descriptions — I can draft compelling copy\n💡 Strategy — Growth and monetization advice\n\nTell me more about your content and I'll get specific!";
+}
+
+// ─── DuckDuckGo Instant Answer API ───────────────────────────────────────────
+
+async function searchDuckDuckGo(query: string): Promise<string | null> {
+  try {
+    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.Answer && data.Answer.length > 10) {
+      return data.Answer;
+    }
+    if (data.AbstractText && data.AbstractText.length > 20) {
+      const source = data.AbstractSource
+        ? ` (Source: ${data.AbstractSource})`
+        : "";
+      return `${data.AbstractText}${source}`;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Wikipedia Summary API ───────────────────────────────────────────────────
+
+async function searchWikipedia(query: string): Promise<string | null> {
+  try {
+    const encoded = encodeURIComponent(query.trim());
+    const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encoded}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data.extract || data.extract.length < 20) return null;
+    // Return first 2 sentences
+    const sentences = data.extract.split(". ");
+    const short = sentences.slice(0, 2).join(". ");
+    return short.endsWith(".") ? short : `${short}.`;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Quick Local Answers (no network needed for common questions) ─────────────
+
+function getLocalAnswer(q: string): string | null {
+  const lower = q.toLowerCase().trim();
+
   if (
-    q.includes("travel vlog") ||
-    (q.includes("travel") && q.includes("idea"))
+    lower === "hi" ||
+    lower === "hello" ||
+    lower === "hey" ||
+    lower.startsWith("hello ") ||
+    lower.startsWith("hi ")
   ) {
-    return "Here are some travel vlog ideas:\n\n1. 24 Hours Exploring Tokyo\n2. Best Street Food in Bangkok\n3. Hidden Beaches You Must Visit\n4. Solo Travel Guide for Budget Travelers\n5. Europe in 10 Days: The Ultimate Itinerary\n6. Most Underrated Cities in the World\n\nWant ideas for a specific destination?";
+    return "Hey! I'm your SUB PREMIUM Global AI Assistant 👋\n\nI can help you with:\n• Geography, history & science\n• World leaders & countries\n• Technology & culture\n• Video ideas, titles & creator tools\n\nAsk me anything!";
   }
 
-  // ── Fallback ───────────────────────────────────────────────────────────────
-  return `That's a great question! While I may not have the most up-to-date information on that specific topic, here's what I know: I'm your Global AI Assistant covering geography, history, science, world leaders, technology, culture, and creator tools.\n\nFor the most current details on "${input}", I recommend checking a reliable source. Is there anything else I can help you with?`;
+  if (
+    lower.includes("help") ||
+    lower.includes("what can you do") ||
+    lower.includes("capabilities")
+  ) {
+    return "Here's what I can help with:\n\n🌍 World knowledge — geography, history, science\n👤 World leaders — presidents, prime ministers\n🏙️ Countries & capitals — facts & culture\n💡 Technology — AI, internet, inventions\n🎬 Creator tools — video ideas, titles, tags\n🔥 Trends — what's popular right now\n\nJust ask me anything!";
+  }
+
+  return null;
+}
+
+// ─── Global Answer Orchestrator ──────────────────────────────────────────────
+
+async function getGlobalAnswer(query: string): Promise<string> {
+  const trimmed = query.trim();
+
+  // 1. Quick local greetings / help
+  const local = getLocalAnswer(trimmed);
+  if (local) return local;
+
+  // 2. Creator tools — handled locally, no network needed
+  if (isCreatorQuery(trimmed)) {
+    return getCreatorAnswer(trimmed);
+  }
+
+  // 3. Try DuckDuckGo Instant Answer
+  const ddgResult = await searchDuckDuckGo(trimmed);
+  if (ddgResult) {
+    return ddgResult;
+  }
+
+  // 4. Try Wikipedia summary
+  const wikiResult = await searchWikipedia(trimmed);
+  if (wikiResult) {
+    return wikiResult;
+  }
+
+  // 5. No reliable answer found
+  return "I couldn't find reliable information for that question. Try rephrasing or asking something more specific.";
 }
 
 // ─── Typing Indicator ─────────────────────────────────────────────────────────
@@ -536,7 +298,7 @@ export function AIAssistant() {
   }, [isOpen]);
 
   const sendMessage = useCallback(
-    (text: string) => {
+    async (text: string) => {
       const trimmed = text.trim();
       if (!trimmed || isTyping) return;
 
@@ -551,10 +313,8 @@ export function AIAssistant() {
       setInput("");
       setIsTyping(true);
 
-      // Simulate AI thinking delay
-      const delay = 800 + Math.random() * 700;
-      setTimeout(() => {
-        const reply = generateGlobalAIReply(trimmed);
+      try {
+        const reply = await getGlobalAnswer(trimmed);
         const aiMsg: Message = {
           id: `a-${Date.now()}`,
           role: "ai",
@@ -562,8 +322,17 @@ export function AIAssistant() {
           timestamp: Date.now(),
         };
         setMessages((prev) => [...prev, aiMsg]);
+      } catch {
+        const errorMsg: Message = {
+          id: `a-${Date.now()}`,
+          role: "ai",
+          text: "I couldn't find reliable information for that question. Try rephrasing or asking something more specific.",
+          timestamp: Date.now(),
+        };
+        setMessages((prev) => [...prev, errorMsg]);
+      } finally {
         setIsTyping(false);
-      }, delay);
+      }
     },
     [isTyping],
   );
@@ -644,9 +413,9 @@ export function AIAssistant() {
                   AI Assistant
                 </p>
                 <div className="flex items-center gap-1.5 mt-0.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
+                  <Globe className="w-2.5 h-2.5 text-green-500" />
                   <span className="text-[10px] text-muted-foreground font-medium">
-                    Global AI — ready to answer anything
+                    Global Knowledge Search
                   </span>
                 </div>
               </div>
@@ -727,7 +496,7 @@ export function AIAssistant() {
                 />
                 <motion.button
                   type="button"
-                  data-ocid="ai_assistant.submit_button"
+                  data-ocid="ai_assistant.send_button"
                   aria-label="Send message"
                   onClick={() => sendMessage(input)}
                   disabled={!input.trim() || isTyping}
