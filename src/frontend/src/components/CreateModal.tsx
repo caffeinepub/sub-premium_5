@@ -278,6 +278,12 @@ function UploadSlide({ onClose }: { onClose: () => void }) {
   };
 
   const handleVideoInputChange = async (file: File) => {
+    // MIME type validation
+    const ALLOWED_TYPES = ["video/mp4", "video/quicktime", "video/webm"];
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      toast.error("Only MP4, MOV, and WEBM videos are supported.");
+      return;
+    }
     // Check for existing resume session
     const fileId = getFileId(file);
     const existingSession = loadSession(fileId);
@@ -402,7 +408,7 @@ function UploadSlide({ onClose }: { onClose: () => void }) {
           <input
             ref={videoInputRef}
             type="file"
-            accept="video/*"
+            accept="video/mp4,video/quicktime,video/webm"
             className="sr-only"
             aria-label="Select video"
             onChange={(e) => {

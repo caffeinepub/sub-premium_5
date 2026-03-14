@@ -1,4 +1,12 @@
-import { Bell, BookOpen, LogOut, Settings, User, Video } from "lucide-react";
+import {
+  Bell,
+  BookOpen,
+  LogOut,
+  Settings,
+  Upload,
+  User,
+  Video,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef } from "react";
 
@@ -31,6 +39,13 @@ const MENU_ITEMS: MenuItem[] = [
     label: "My Videos",
     icon: Video,
     ocid: "account_menu.my_videos.button",
+    accent: false,
+  },
+  {
+    id: "uploads",
+    label: "Uploads",
+    icon: Upload,
+    ocid: "account_menu.uploads.button",
     accent: false,
   },
   {

@@ -175,20 +175,27 @@ export function DraftVideoCard({ draft, onRemove }: DraftVideoCardProps) {
   const isError = draft.stage === "error";
   const isUploading = draft.stage === "uploading";
   const isProcessing = draft.stage === "processing";
+  const isPublished = draft.stage === "published";
 
   const stageBadgeStyle: React.CSSProperties = isUploading
     ? { background: "#FF0000", color: "#fff" }
     : isProcessing
-      ? { background: "#F59E0B", color: "#fff" }
-      : { background: "rgba(255,255,255,0.15)", color: "#fff" };
+      ? { background: "#3B82F6", color: "#fff" }
+      : isPublished
+        ? { background: "#22C55E", color: "#fff" }
+        : isError
+          ? { background: "#EF4444", color: "#fff" }
+          : { background: "rgba(255,255,255,0.15)", color: "#fff" };
 
   const stageLabel = isUploading
-    ? "Uploading"
+    ? "Uploading…"
     : isProcessing
-      ? "Processing"
-      : isError
-        ? "Failed"
-        : "Done";
+      ? "Processing…"
+      : isPublished
+        ? "Published ✓"
+        : isError
+          ? "Upload failed"
+          : "Done";
 
   return (
     <motion.div
@@ -232,7 +239,13 @@ export function DraftVideoCard({ draft, onRemove }: DraftVideoCardProps) {
               <Upload
                 className="w-8 h-8"
                 style={{
-                  color: isUploading ? "#FF0000" : "#F59E0B",
+                  color: isUploading
+                    ? "#FF0000"
+                    : isProcessing
+                      ? "#3B82F6"
+                      : isPublished
+                        ? "#22C55E"
+                        : "#F59E0B",
                   opacity: 0.8,
                 }}
               />
@@ -280,7 +293,13 @@ export function DraftVideoCard({ draft, onRemove }: DraftVideoCardProps) {
                 className="h-1 transition-all duration-300"
                 style={{
                   width: `${draft.progress}%`,
-                  background: isUploading ? "#FF0000" : "#F59E0B",
+                  background: isUploading
+                    ? "#FF0000"
+                    : isProcessing
+                      ? "#3B82F6"
+                      : isPublished
+                        ? "#22C55E"
+                        : "#F59E0B",
                 }}
               />
             </div>
@@ -324,7 +343,13 @@ export function DraftVideoCard({ draft, onRemove }: DraftVideoCardProps) {
                     className="h-full rounded-full transition-all duration-300"
                     style={{
                       width: `${draft.progress}%`,
-                      background: isUploading ? "#FF0000" : "#F59E0B",
+                      background: isUploading
+                        ? "#FF0000"
+                        : isProcessing
+                          ? "#3B82F6"
+                          : isPublished
+                            ? "#22C55E"
+                            : "#F59E0B",
                     }}
                   />
                 </div>

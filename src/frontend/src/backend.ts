@@ -55,6 +55,7 @@ export class ExternalBlob {
     _blob?: Uint8Array<ArrayBuffer> | null;
     directURL: string;
     onProgress?: (percentage: number) => void = undefined;
+    private _fileRef?: File | null = null;
     private constructor(directURL: string, blob: Uint8Array<ArrayBuffer> | null){
         if (blob) {
             this._blob = blob;
@@ -72,13 +73,23 @@ export class ExternalBlob {
         }));
         return new ExternalBlob(url, blob);
     }
+    static fromFile(file: File): ExternalBlob {
+        const url = URL.createObjectURL(file);
+        const instance = new ExternalBlob(url, null);
+        instance._fileRef = file;
+        return instance;
+    }
     public async getBytes(): Promise<Uint8Array<ArrayBuffer>> {
         if (this._blob) {
             return this._blob;
         }
+        if (this._fileRef) {
+            this._blob = new Uint8Array(await this._fileRef.arrayBuffer()) as Uint8Array<ArrayBuffer>;
+            return this._blob;
+        }
         const response = await fetch(this.directURL);
         const blob = await response.blob();
-        this._blob = new Uint8Array(await blob.arrayBuffer());
+        this._blob = new Uint8Array(await blob.arrayBuffer()) as Uint8Array<ArrayBuffer>;
         return this._blob;
     }
     public getDirectURL(): string {
@@ -87,6 +98,9 @@ export class ExternalBlob {
     public withUploadProgress(onProgress: (percentage: number) => void): ExternalBlob {
         this.onProgress = onProgress;
         return this;
+    }
+    public getFileRef(): File | null {
+        return this._fileRef ?? null;
     }
 }
 export interface UserProfile {

@@ -204,12 +204,14 @@ interface HomePageProps {
   onCreatorClick?: (principalId: string) => void;
   onProfileTab?: () => void;
   onLogout?: () => void;
+  onOpenUploads?: () => void;
 }
 
 export default function HomePage({
   onCreatorClick,
   onProfileTab,
   onLogout,
+  onOpenUploads,
 }: HomePageProps) {
   const { data: videos, isLoading } = useListVideoPosts();
   const { identity } = useInternetIdentity();
@@ -382,6 +384,8 @@ export default function HomePage({
       setNotificationsOpen(true);
     } else if (item === "logout") {
       onLogout?.();
+    } else if (item === "uploads") {
+      onOpenUploads?.();
     } else {
       // profile, myVideos, subscriptions, settings — all go to profile tab
       onProfileTab?.();

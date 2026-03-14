@@ -6,6 +6,7 @@ import { AIAssistant } from "./components/AIAssistant";
 import { BottomNav } from "./components/BottomNav";
 import type { TabId } from "./components/BottomNav";
 import { CreateModal } from "./components/CreateModal";
+import { UploadProgressBubble } from "./components/UploadProgressBubble";
 import { UploadManagerProvider } from "./contexts/UploadManagerContext";
 import { useActor } from "./hooks/useActor";
 import { useInternetIdentity } from "./hooks/useInternetIdentity";
@@ -23,6 +24,7 @@ import RechargePage from "./pages/RechargePage";
 import SetupProfilePage from "./pages/SetupProfilePage";
 import ShortsCreatePage from "./pages/ShortsCreatePage";
 import ShortsPage from "./pages/ShortsPage";
+import UploadsTrayPage from "./pages/UploadsTrayPage";
 import WalletPage from "./pages/WalletPage";
 import WithdrawPage from "./pages/WithdrawPage";
 import { updateActiveStatus } from "./utils/activeStatus";
@@ -43,6 +45,7 @@ function AppInner() {
   const [creatorProfileRoute, setCreatorProfileRoute] = useState<{
     principalId: string;
   } | null>(null);
+  const [showUploadsTray, setShowUploadsTray] = useState(false);
   const [profileTimedOut, setProfileTimedOut] = useState(false);
   const [initTimedOut, setInitTimedOut] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -85,7 +88,9 @@ function AppInner() {
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="w-8 h-8 text-primary animate-spin" />
-          <p className="text-sm text-muted-foreground">Restoring session…</p>
+          <p className="text-sm text-muted-foreground">
+            Restoring session\u2026
+          </p>
         </div>
       </div>
     );
@@ -97,7 +102,7 @@ function AppInner() {
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
           <p className="text-sm text-muted-foreground">
-            Taking longer than expected…
+            Taking longer than expected\u2026
           </p>
           <button
             type="button"
@@ -126,16 +131,12 @@ function AppInner() {
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="w-8 h-8 text-primary animate-spin" />
-          <p className="text-sm text-muted-foreground">Setting up…</p>
+          <p className="text-sm text-muted-foreground">Setting up\u2026</p>
         </div>
       </div>
     );
   }
 
-  // Show profile setup only when we have a definitive null (no profile exists).
-  // Guard against the brief window where actor is still initializing but profileFetched
-  // flips to true with null data — that would incorrectly redirect to SetupProfilePage.
-  // Only show setup once the actor is ready AND not still fetching.
   const showProfileSetup =
     isAuthenticated &&
     !actorFetching &&
@@ -161,20 +162,31 @@ function AppInner() {
     setShortsSubRoute(null);
     setWalletSubRoute(null);
     setCreatorProfileRoute(null);
+    setShowUploadsTray(false);
   };
 
   // Whether we're in a full-screen sub-route (hide bottom nav)
-  // Also hide nav when create modal is open or live sub-routes are active
   const isFullScreenRoute =
     creatorProfileRoute !== null ||
     walletSubRoute !== null ||
     liveSubRoute !== null ||
+    showUploadsTray ||
     (activeTab === "shorts" && shortsSubRoute !== null) ||
     showCreateModal;
 
   // ─── Page renderer ────────────────────────────────────────────────────────
 
   const renderPage = () => {
+    // UPLOADS TRAY
+    if (showUploadsTray) {
+      return (
+        <UploadsTrayPage
+          key="uploads-tray"
+          onBack={() => setShowUploadsTray(false)}
+        />
+      );
+    }
+
     // CREATOR PROFILE sub-route (full-screen, hide bottom nav)
     if (creatorProfileRoute !== null) {
       return (
@@ -259,6 +271,7 @@ function AppInner() {
             }
             onProfileTab={() => navigateToTab("profile")}
             onLogout={() => navigateToTab("profile")}
+            onOpenUploads={() => setShowUploadsTray(true)}
           />
         );
       case "shorts":
@@ -293,6 +306,7 @@ function AppInner() {
             key="home"
             onProfileTab={() => navigateToTab("profile")}
             onLogout={() => navigateToTab("profile")}
+            onOpenUploads={() => setShowUploadsTray(true)}
           />
         );
     }
@@ -318,7 +332,7 @@ function AppInner() {
           >
             <AnimatePresence mode="wait">
               <motion.div
-                key={`${activeTab}-${liveSubRoute?.type ?? "null"}-${shortsSubRoute?.type ?? "null"}-${creatorProfileRoute?.principalId ?? "null"}`}
+                key={`${activeTab}-${liveSubRoute?.type ?? "null"}-${shortsSubRoute?.type ?? "null"}-${creatorProfileRoute?.principalId ?? "null"}-${showUploadsTray ? "uploads" : ""}`}
                 initial={{
                   opacity: 0,
                   x: isShortsPage || isFullScreenRoute ? 0 : 8,
@@ -345,13 +359,17 @@ function AppInner() {
             />
           )}
 
-          {/* Floating AI Assistant — hidden in full-screen sub-routes only.
-              Visible on all tabs including profile. Fails silently if actor not ready. */}
+          {/* Floating upload progress bubble — visible on all non-fullscreen routes */}
+          {!isFullScreenRoute && !!actor && (
+            <UploadProgressBubble onPress={() => setShowUploadsTray(true)} />
+          )}
+
+          {/* Floating AI Assistant */}
           {!isFullScreenRoute && !!actor && <AIAssistant />}
         </div>
       </div>
 
-      {/* Create Modal — rendered outside the max-width container to cover full screen */}
+      {/* Create Modal */}
       {showCreateModal && (
         <CreateModal
           onClose={() => setShowCreateModal(false)}

@@ -17,15 +17,10 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ExternalBlob } from "../backend";
 import {
-  type UploadSession,
-  clearSession,
-  getFileId,
-  loadSession,
-  useChunkedUpload,
-} from "../hooks/useChunkedUpload";
-import { useCreateVideoPost } from "../hooks/useQueries";
+  clearResilientSession,
+  useResilientUpload,
+} from "../hooks/useResilientUpload";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -97,24 +92,43 @@ export default function UploadPage() {
   const [thumbnailFile, setThumbnailFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [videoProgress, setVideoProgress] = useState(0);
-  const [stage, setStage] = useState<UploadStage>("idle");
-  const [chunkInfo, setChunkInfo] = useState("");
+  const [uiStage, setUiStage] = useState<UploadStage>("idle");
   const [retryInfo, setRetryInfo] = useState("");
-  const [resumeSession, setResumeSession] = useState<UploadSession | null>(
-    null,
-  );
 
   const videoInputRef = useRef<HTMLInputElement>(null);
   const thumbnailInputRef = useRef<HTMLInputElement>(null);
-  const createPost = useCreateVideoPost();
-  const { uploadFile, cancelUpload } = useChunkedUpload();
+
+  const { session, startUpload, cancelUpload, resumeDetected, dismissResume } =
+    useResilientUpload();
+
+  // Pre-fill form fields from resume session (only on initial detection)
+  useEffect(() => {
+    if (resumeDetected) {
+      setTitle((prev) => (prev ? prev : resumeDetected.title));
+      setDescription((prev) => (prev ? prev : resumeDetected.description));
+    }
+  }, [resumeDetected]);
+
+  const videoProgress = session?.progressPct ?? 0;
+  const stage =
+    uiStage === "done" || uiStage === "error"
+      ? uiStage
+      : session?.stage === "done"
+        ? "done"
+        : session?.stage === "error"
+          ? "error"
+          : session?.stage === "uploading"
+            ? getStageFromProgress(videoProgress)
+            : uiStage;
 
   const isUploadActive =
     stage === "uploading" ||
     stage === "processing" ||
     stage === "encoding" ||
     stage === "finalizing";
+
+  const uploadedChunks = session?.uploadedChunks ?? 0;
+  const totalChunks = session?.totalChunks ?? 0;
 
   // ── Prevent page leave during active upload ──
   useEffect(() => {
@@ -125,17 +139,6 @@ export default function UploadPage() {
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [isUploadActive]);
-
-  // ── Visibility change — keep upload alive ──
-  useEffect(() => {
-    if (!isUploadActive) return;
-    const handleVisibility = () => {
-      // Background fetch/XHR continues automatically; nothing to do
-    };
-    document.addEventListener("visibilitychange", handleVisibility);
-    return () =>
-      document.removeEventListener("visibilitychange", handleVisibility);
   }, [isUploadActive]);
 
   const canPublish = !!videoFile && title.trim().length > 0 && !isUploadActive;
@@ -153,18 +156,8 @@ export default function UploadPage() {
       return;
     }
     setVideoFile(file);
-    setStage("idle");
-    setChunkInfo("");
+    setUiStage("idle");
     setRetryInfo("");
-
-    // Check for existing resume session
-    const fileId = getFileId(file);
-    const existingSession = loadSession(fileId);
-    if (existingSession && existingSession.completedChunks.length > 0) {
-      setResumeSession(existingSession);
-    } else {
-      setResumeSession(null);
-    }
   };
 
   const handleThumbnailSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -178,98 +171,38 @@ export default function UploadPage() {
   const handlePublish = async () => {
     if (!videoFile || !title.trim()) return;
 
-    setStage("uploading");
-    setVideoProgress(0);
-    setChunkInfo("");
+    setUiStage("uploading");
     setRetryInfo("");
-    setResumeSession(null);
 
     try {
-      // Chunked read phase (0–60%)
-      const videoBytes = await uploadFile(
-        videoFile,
-        (pct, info) => {
-          setVideoProgress(pct);
-          setStage(getStageFromProgress(pct));
-          setChunkInfo(info);
-        },
-        (info) => setRetryInfo(info),
-      );
-
-      setRetryInfo("");
-
-      // ExternalBlob upload phase (60–100%)
-      const videoBlob = ExternalBlob.fromBytes(
-        videoBytes as Uint8Array<ArrayBuffer>,
-      ).withUploadProgress((pct) => {
-        // Map ExternalBlob's 0–100 into our 60–100 range
-        const mapped = 60 + Math.round(pct * 0.4);
-        setVideoProgress(mapped);
-        setStage(getStageFromProgress(mapped));
-        setChunkInfo("");
-      });
-
-      let thumbnailBlob: ExternalBlob;
-      if (thumbnailFile) {
-        const thumbBytes = await readFileAsBytes(thumbnailFile);
-        thumbnailBlob = ExternalBlob.fromBytes(thumbBytes);
-      } else {
-        const fallbackBytes = new Uint8Array([
-          137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0,
-          1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 10, 73, 68,
-          65, 84, 120, 156, 98, 0, 1, 0, 0, 5, 0, 1, 13, 10, 45, 180, 0, 0, 0,
-          0, 73, 69, 78, 68, 174, 66, 96, 130,
-        ]);
-        thumbnailBlob = ExternalBlob.fromBytes(fallbackBytes);
-      }
-
-      const postId = await createPost.mutateAsync({
-        title: title.trim(),
-        description: description.trim(),
-        videoBlob,
-        thumbnailBlob,
-      });
-
-      void postId;
-
-      // Success — clear session
-      const fileId = getFileId(videoFile);
-      clearSession(fileId);
-
-      setVideoProgress(100);
-      setStage("done");
+      await startUpload(videoFile, title, description, thumbnailFile);
+      setUiStage("done");
 
       setTimeout(() => {
         setVideoFile(null);
         setThumbnailFile(null);
         setTitle("");
         setDescription("");
-        setVideoProgress(0);
-        setStage("idle");
-        setChunkInfo("");
+        setUiStage("idle");
+        setRetryInfo("");
         toast.success("Video published successfully!");
       }, 2000);
-    } catch (err) {
-      // Keep session in localStorage so user can resume on retry
-      setStage("error");
-      setChunkInfo("");
+    } catch {
+      setUiStage("error");
       setRetryInfo("");
-      console.error(err);
     }
   };
 
   const handleStartOver = () => {
-    if (videoFile) {
-      clearSession(getFileId(videoFile));
+    if (resumeDetected) {
+      clearResilientSession(resumeDetected.uploadSessionId);
     }
-    setResumeSession(null);
+    dismissResume();
   };
 
   const handleCancelUpload = () => {
     cancelUpload();
-    setStage("idle");
-    setVideoProgress(0);
-    setChunkInfo("");
+    setUiStage("idle");
     setRetryInfo("");
   };
 
@@ -337,7 +270,6 @@ export default function UploadPage() {
                   onClick={(e) => {
                     e.stopPropagation();
                     setVideoFile(null);
-                    setResumeSession(null);
                   }}
                   className="absolute top-2 right-2 w-6 h-6 rounded-full bg-card flex items-center justify-center text-muted-foreground hover:text-foreground"
                   aria-label="Remove video"
@@ -359,13 +291,13 @@ export default function UploadPage() {
 
           {/* ── Resume Prompt Banner ── */}
           <AnimatePresence>
-            {resumeSession && !isUploadActive && (
+            {resumeDetected && !isUploadActive && (
               <motion.div
                 initial={{ opacity: 0, y: -8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.25 }}
-                data-ocid="upload.resume.panel"
+                data-ocid="upload.session_id.panel"
                 className="rounded-2xl p-4 flex flex-col gap-3"
                 style={{
                   background: "rgba(251,191,36,0.08)",
@@ -377,24 +309,38 @@ export default function UploadPage() {
                     className="w-4 h-4 shrink-0 mt-0.5"
                     style={{ color: "#fbbf24" }}
                   />
-                  <div>
+                  <div className="flex-1 min-w-0">
                     <p
                       className="text-sm font-bold"
                       style={{ color: "#fbbf24" }}
                     >
                       Upload interrupted — resume?
                     </p>
-                    <p className="text-xs mt-0.5 text-muted-foreground">
-                      {resumeSession.completedChunks.length} /{" "}
-                      {resumeSession.totalChunks} chunks already uploaded
+                    <p className="text-xs mt-0.5 text-muted-foreground font-mono">
+                      Session: {resumeDetected.uploadSessionId.slice(0, 8)}…
                     </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {resumeDetected.uploadedChunks} /{" "}
+                      {resumeDetected.totalChunks} chunks saved
+                    </p>
+                    {resumeDetected.title && (
+                      <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                        "{resumeDetected.title}"
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div className="flex gap-2">
                   <Button
                     type="button"
                     data-ocid="upload.resume.primary_button"
-                    onClick={() => void handlePublish()}
+                    onClick={() => {
+                      if (videoFile) void handlePublish();
+                      else
+                        toast.info(
+                          "Re-select the same video file to resume upload.",
+                        );
+                    }}
                     className="flex-1 h-9 rounded-xl text-xs font-bold"
                     style={{ background: "#fbbf24", color: "#0f0f0f" }}
                   >
@@ -403,7 +349,7 @@ export default function UploadPage() {
                   <Button
                     type="button"
                     variant="outline"
-                    data-ocid="upload.resume.secondary_button"
+                    data-ocid="upload.resume.dismiss_button"
                     onClick={handleStartOver}
                     className="flex-1 h-9 rounded-xl text-xs font-bold border-border/50"
                   >
@@ -575,9 +521,9 @@ export default function UploadPage() {
                 <Progress value={videoProgress} className="h-2 bg-border" />
 
                 {/* Chunk info */}
-                {chunkInfo && (
+                {totalChunks > 0 && (
                   <p className="text-xs text-muted-foreground text-center">
-                    {chunkInfo}
+                    Chunk {uploadedChunks} / {totalChunks}
                   </p>
                 )}
 
@@ -680,7 +626,7 @@ export default function UploadPage() {
                   type="button"
                   data-ocid="upload.retry.button"
                   onClick={() => {
-                    setStage("idle");
+                    setUiStage("idle");
                     void handlePublish();
                   }}
                   className="h-10 px-5 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-sm gap-2"
@@ -743,22 +689,6 @@ export default function UploadPage() {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function readFileAsBytes(file: File): Promise<Uint8Array<ArrayBuffer>> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const result = e.target?.result;
-      if (result instanceof ArrayBuffer) {
-        resolve(new Uint8Array(result));
-      } else {
-        reject(new Error("Failed to read file"));
-      }
-    };
-    reader.onerror = () => reject(new Error("FileReader error"));
-    reader.readAsArrayBuffer(file);
-  });
-}
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
